@@ -20,7 +20,6 @@ htmlcov/
 # build/ holds the committed control panel (Manage-RamOptimizer.bat +
 # RamOptimizerControl.ps1). Everything PyInstaller and CI drop in there is
 # ignored, so the folder stays small and reviewable.
-build/RamOptimizerService/
 build/*.zip
 release/
 installer/Output/
@@ -34,3 +33,5 @@ Desktop.ini
 *.log
 crash.log
 version_info.txt
+build/RamOptimizerService/*
+!build/RamOptimizerService/README.txt

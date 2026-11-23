@@ -46,7 +46,23 @@ def test_build_folder_is_not_ignored_but_exe_is() -> None:
     )
     if check.returncode not in (0, 1):  # git در دسترس نیست
         pytest.skip("git is not available")
-    assert check.returncode == 0, "the built exe must stay out of Git"
+    if check.returncode != 0:
+        # هنوز بیلدی انجام نشده؛ همان قاعده را با یک مسیر فرضی بسنج
+        check = subprocess.run(
+            ["git", "check-ignore", "-v", "build/RamOptimizerService/RamOptimizerService.exe"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert "build/RamOptimizerService/*" in check.stdout or check.returncode == 0
+    # README راهنما باید نسخه‌بندی شود تا پوشه خالی نماند
+    note = subprocess.run(
+        ["git", "check-ignore", "build/RamOptimizerService/README.txt"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert note.returncode == 1, "build/RamOptimizerService/README.txt must not be ignored"
 
     panel = subprocess.run(
         ["git", "check-ignore", "build/RamOptimizerControl.ps1"],

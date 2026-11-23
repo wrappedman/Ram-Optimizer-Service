@@ -153,6 +153,7 @@ jobs:
           name: RamOptimizerService-windows
           path: |
             build/RamOptimizerService/
+            !build/RamOptimizerService/README.txt
             build/Manage-RamOptimizer.bat
             build/RamOptimizerControl.ps1
             build/build_info.json
