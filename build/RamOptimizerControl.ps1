@@ -518,10 +518,20 @@ if ($Action -ne 'menu') {
 }
 
 while ($true) {
-    if ($Host.Name -eq 'ConsoleHost') { Clear-Host }
+    # Clear-Host throws when the console handle is not a real console (task
+    # scheduler, redirected input, some terminals): never let cosmetics fail
+    # the panel.
+    if ($Host.Name -eq 'ConsoleHost') {
+        try { Clear-Host } catch { }
+    }
     Show-Menu
-    $choice = (Read-Host '  Select').Trim()
-    if ($choice -eq '0' -or $choice -eq 'q' -or $choice -eq 'Q') { break }
+    $choice = Read-Host '  Select'
+    if ($null -eq $choice) {
+        Write-Note 'no more input - closing the panel'
+        break
+    }
+    $choice = $choice.Trim()
+    if ($choice -eq '' -or $choice -eq '0' -or $choice -eq 'q' -or $choice -eq 'Q') { break }
     try {
         Invoke-MenuAction $choice
     } catch {
