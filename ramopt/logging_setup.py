@@ -226,6 +226,9 @@ def install_crash_handlers() -> None:
     sys.excepthook = _hook
 
     if hasattr(threading, "excepthook"):
+        # threading.__excepthook__ فقط از Python 3.10 وجود دارد؛ روی 3.9
+        # getattr نمی‌گیریم وگرنه AttributeError خودش باعث کرش می‌شود.
+        default_hook = getattr(threading, "__excepthook__", None)
 
         def _thread_hook(args):  # pragma: no cover - فقط خطای ترد
             write_crash(
@@ -234,7 +237,11 @@ def install_crash_handlers() -> None:
                 args.exc_traceback,
                 note=f"thread={getattr(args.thread, 'name', '?')}",
             )
-            threading.__excepthook__(args)
+            if default_hook is not None:
+                try:
+                    default_hook(args)
+                except Exception:
+                    pass
 
         threading.excepthook = _thread_hook
 

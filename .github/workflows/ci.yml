@@ -42,8 +42,27 @@ jobs:
       - name: Mypy
         run: mypy ramopt || true   # فعلاً غیرمسدودکننده؛ بعد از پایدار شدن اجباری می‌شود
 
+      - name: Minimum Python version guard (3.9)
+        run: |
+          # Keep the declared floor honest: nothing may use syntax/APIs newer
+          # than 3.9 (e.g. threading.__excepthook__, datetime.UTC, match, ...).
+          python -m pip install vermin
+          vermin -t=3.9- --no-tips --eval-annotations --violations \
+            ramopt tests tools ram_optimizer_service.py
+
       - name: Pytest (cross-platform policy tests)
-        run: pytest -q
+        run: |
+          set -o pipefail
+          pytest -q --tb=short 2>&1 | tee pytest-out.txt
+
+      - name: Publish failure as annotation (readable without log access)
+        if: failure()
+        run: |
+          grep -E '^(FAILED|ERROR|E  |Traceback)' pytest-out.txt | head -12 | \
+            while read -r line; do echo "::error::$line"; done
+          if ! grep -qE '^(FAILED|ERROR)' pytest-out.txt; then
+            tail -40 pytest-out.txt | while read -r line; do echo "::error::$line"; done
+          fi
 
   # ---------------------------------------------------------------------------
   # Real Windows: real ctypes structures, real GlobalMemoryStatusEx,
