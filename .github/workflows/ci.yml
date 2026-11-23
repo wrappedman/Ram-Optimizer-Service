@@ -184,9 +184,10 @@ jobs:
           $out = & $exe verify --simulate-critical 2>&1 | Out-String
           Write-Output $out
           if ($LASTEXITCODE -ne 0) { throw "verify failed" }
-          if ($out -notmatch 'هر 60 ثانیه') { throw "the 60 s cycle is not reported" }
+          if ($out -notmatch 'every 60 s') { throw "the 60 s cycle is not reported" }
           if ($out -notmatch 'T\+0s') { throw "the immediate critical pass is not reported" }
           if ($out -notmatch 'critical=True') { throw "the critical decision did not fire" }
+          if ($out -notmatch 'T\+5s') { throw "the critical poll interval is not reported" }
 
       - name: Publish failure as annotation (any step)
         if: failure()
