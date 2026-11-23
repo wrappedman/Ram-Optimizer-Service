@@ -1,0 +1,37 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+# NOT build/ itself: that folder holds the committed control panel.
+dist/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- PyInstaller / build output ---
+# build/ holds the committed control panel (Manage-RamOptimizer.bat +
+# RamOptimizerControl.ps1). Everything PyInstaller and CI drop in there is
+# ignored, so the folder stays small and reviewable.
+build/*.zip
+release/
+installer/Output/
+installer/*.exe
+*.spec.bak
+version_info_stamp.py
+
+# --- Windows ---
+Thumbs.db
+Desktop.ini
+*.log
+crash.log
+version_info.txt
+build/RamOptimizerService/*
+!build/RamOptimizerService/README.txt

@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ram-optimizer-service"
+version = "2.0.0"
+description = "Windows service that trims working sets and purges the standby list when physical memory is under real pressure"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "GPL-3.0-only" }
+authors = [{ name = "Behnam Ehsani" }]
+keywords = ["windows", "service", "memory", "ram", "standby-list", "working-set"]
+classifiers = [
+  "Environment :: Win32 (MS Windows)",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "Operating System :: Microsoft :: Windows :: Windows 10",
+  "Operating System :: Microsoft :: Windows :: Windows 11",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Systems Administration",
+]
+dependencies = [
+  "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "pyinstaller>=6.0; sys_platform == 'win32'",
+]
+
+[project.urls]
+Homepage = "https://github.com/wrappedman/Ram-Optimizer-Service"
+Issues = "https://github.com/wrappedman/Ram-Optimizer-Service/issues"
+Changelog = "https://github.com/wrappedman/Ram-Optimizer-Service/blob/main/CHANGELOG.md"
+
+[project.scripts]
+ramopt = "ramopt.cli:main"
+
+[tool.setuptools]
+packages = ["ramopt"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "windows: test requires a real Windows API (skipped elsewhere)",
+  "external: needs an external tool (git); skipped when it is not installed",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["ramopt", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "E501",   # line length is handled by the formatter
+  "UP009",  # `# -*- coding: utf-8 -*-` is kept deliberately: source files contain Persian
+  "UP037",  # forward-referenced annotations are used for injected-dependency typing
+  "SIM105", # contextlib.suppress(...) is noisier than try/except in this codebase
+  "SIM112", # Windows env vars are spelled ProgramData/SystemRoot on purpose
+  "RUF001", # Persian/Arabic text legitimately contains "ambiguous" unicode
+  "RUF002",
+  "RUF003",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ramopt"]
+
+[tool.ruff.lint.per-file-ignores]
+# فایل spec توسط PyInstaller با متغیرهای تزریقی (SPECPATH, Analysis, …) اجرا می‌شود
+"*.spec" = ["F821"]
+"tests/*" = ["ARG001"]
+"tools/*" = ["E402"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+ignore_missing_imports = true
+packages = ["ramopt"]
+# ماژول‌هایی که ماهیتاً به API ویندوز وابسته‌اند در لینوکس قابل بررسی دقیق
+# نیستند (ctypes.WinDLL، wintypes.HRESULT، pywin32). بررسی آن‌ها در CI ویندوز
+# با اجرای واقعی تست‌ها انجام می‌شود.
+[[tool.mypy.overrides]]
+module = ["ramopt.win32", "ramopt.service", "ramopt.service_admin", "ramopt.memory", "ramopt.logging_setup"]
+disable_error_code = ["attr-defined", "import-untyped", "arg-type", "assignment"]

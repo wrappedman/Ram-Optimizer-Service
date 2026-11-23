@@ -1,3 +1,8 @@
-psutil>=5.9.0
-pywin32>=306
-pyinstaller>=6.0
+# نیازمندی‌های زمان اجرا (روی ویندوز نصب کنید)
+# Runtime requirements. pywin32 is only needed on Windows; on other platforms the
+# core policy/engine modules are still importable (used by the test suite).
+#
+# psutil خواندن فهرست پروسه‌ها با نام و اندازه‌ی Working Set را ساده می‌کند
+# (و روی لینوکس/مک هم برای تست‌ها کار می‌کند).
+psutil>=5.9
+pywin32>=306; sys_platform == "win32"

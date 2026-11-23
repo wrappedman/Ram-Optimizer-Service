@@ -1,8 +1,8 @@
 @echo off
-setlocal
-title RamOptimizer - Remove Scheduled Task
+setlocal EnableExtensions
+title RamOptimizer - Remove scheduled task
+cd /d "%~dp0"
 
-:: --- Self-elevate to Administrator ---
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo Requesting administrator privileges...
@@ -15,7 +15,11 @@ schtasks /End /TN "RamOptimizer" >nul 2>&1
 
 echo Removing task...
 schtasks /Delete /TN "RamOptimizer" /F
+if errorlevel 1 (
+    echo Task "RamOptimizer" was not found - nothing to remove.
+)
 
 echo.
 echo Done.
 pause
+exit /b 0
