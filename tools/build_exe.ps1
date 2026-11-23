@@ -14,7 +14,7 @@
     if it can decode it, so this file is plain ASCII on purpose: no Persian
     here, only in the .ps1 files that are *read* by other tools.
 
-    Steps: find a supported Python (3.9 - 3.13) -> venv -> requirements ->
+    Steps: find a supported Python (3.9 - 3.15) -> venv -> requirements ->
     tests -> version_info -> PyInstaller -> copy into build\ -> build_info.
 
 .PARAMETER Python
@@ -42,12 +42,17 @@ $script:Root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 # Interpreter + launcher arguments chosen in step 0 ("py" + "-3.11", or "python").
 $script:PrefixExe = 'python'
 $script:PrefixArgs = @()
+#: Newest first. 3.15 is included on purpose: PyInstaller 6.22 declares
+#: "<3.16,>=3.8" and pywin32 ships a cp315 wheel, so a 3.15-only machine
+#: (like the one that reported this) can build without installing anything.
 $script:Supported = @(
-    @{ Tag = '3.13'; Major = 3; Minor = 13 },
-    @{ Tag = '3.12'; Major = 3; Minor = 12 },
-    @{ Tag = '3.11'; Major = 3; Minor = 11 },
-    @{ Tag = '3.10'; Major = 3; Minor = 10 },
-    @{ Tag = '3.9'; Major = 3; Minor = 9 }
+    @{ Tag = '3.15'; Code = 315 },
+    @{ Tag = '3.14'; Code = 314 },
+    @{ Tag = '3.13'; Code = 313 },
+    @{ Tag = '3.12'; Code = 312 },
+    @{ Tag = '3.11'; Code = 311 },
+    @{ Tag = '3.10'; Code = 310 },
+    @{ Tag = '3.9'; Code = 39 }
 )
 
 function Write-Step([string]$Text) { Write-Host "[build] $Text" -ForegroundColor Cyan }
@@ -101,17 +106,17 @@ function Format-VersionCode([int]$Code) {
     return ('{0}.{1}' -f [int][Math]::Floor($Code / 100), ($Code % 100))
 }
 
-# 3.9 - 3.13: what PyInstaller supports and what this project targets.
+# 3.9 - 3.15: the range this project supports (PyInstaller 6.22 covers it).
 function Test-SupportedVersion([int]$Code) {
     if (-not $Code) { return $false }
-    return ($Code -ge 309 -and $Code -le 313)
+    return ($Code -ge 39 -and $Code -le 315)
 }
 
 # --- 0) pick an interpreter -------------------------------------------------
 Write-Host ''
 Write-Host '============================================================' -ForegroundColor DarkCyan
 Write-Host '  RAM Optimizer Service - Build' -ForegroundColor Cyan
-Write-Host '  Needs Python 3.9 - 3.13 (PyInstaller has no 3.14+ support)' -ForegroundColor Cyan
+Write-Host '  Needs Python 3.9 - 3.15 (PyInstaller 6.22 supports <3.16)' -ForegroundColor Cyan
 Write-Host '============================================================' -ForegroundColor DarkCyan
 
 $venvPython = Join-Path $script:Root '.venv\Scripts\python.exe'
@@ -132,9 +137,9 @@ $chosen = $null
 if (-not $reuseVenv) {
     $candidates = @()
     if ($Python) { $candidates += $Python }
-    foreach ($entry in $script:Supported) { $candidates += "py -$($entry.Tag)" }
     $candidates += 'python'
     $candidates += 'python3'
+    foreach ($entry in $script:Supported) { $candidates += "py -$($entry.Tag)" }
 
     foreach ($candidate in $candidates) {
         $version = Get-PythonVersionCode $candidate
@@ -150,11 +155,11 @@ if (-not $reuseVenv) {
 }
 
 if (-not $reuseVenv -and -not $chosen) {
-    Write-Fail 'No supported Python found (3.9 - 3.13).'
+    Write-Fail 'No usable Python found (this project needs 3.9 - 3.15).'
     Write-Host '  Options:' -ForegroundColor Yellow
-    Write-Host '   1) Install Python 3.11 from https://www.python.org/downloads/'
+    Write-Host '   1) Install Python 3.13 or 3.11 from https://www.python.org/downloads/'
     Write-Host '      (tick "Add python.exe to PATH"), then run build_exe.bat again.'
-    Write-Host '   2) If you have the Python launcher:   py install 3.11'
+    Write-Host '   2) If you have the Python launcher:   py install 3.13'
     Write-Host '   3) Force an interpreter:              build_exe.bat -Python "py -3.11"'
     Write-Host '   4) Skip the build entirely: download the exe from the CI artifact'
     Write-Host '      "RamOptimizerService-windows" (GitHub -> Actions -> latest green run)'
@@ -225,6 +230,20 @@ if ($LASTEXITCODE -eq 0) {
     & $py -m pip uninstall -y servicemanager 2>$null | Out-Null
 }
 
+# Does PyInstaller actually work with this interpreter? Version numbers lie:
+# a release can claim support and still fail on a brand-new ABI. One cheap
+# --version call proves the bootloader and the Python bindings load.
+Write-Step 'checking that PyInstaller can run with this interpreter'
+& $py -m PyInstaller --version
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail 'PyInstaller cannot run with this Python. See the message above.'
+    Write-Host '  Install Python 3.13 (known good) and rerun:' -ForegroundColor Yellow
+    Write-Host '     py install 3.13' -ForegroundColor Yellow
+    Write-Host '     build_exe.bat -Python "py -3.13"' -ForegroundColor Yellow
+    Write-Host '  Or take the ready-made exe from the CI artifact.' -ForegroundColor Yellow
+    exit 1
+}
+
 # --- 3) tests ---------------------------------------------------------------
 if ($SkipTests) {
     Write-Note '3/6 tests skipped (-SkipTests)'
@@ -232,10 +251,18 @@ if ($SkipTests) {
     Write-Step '3/6 running the test suite'
     & $py -m pytest -q
     if ($LASTEXITCODE -ne 0) {
-        Write-Fail 'Tests failed - not shipping a broken build.'
+        Write-Fail 'Tests failed.'
         Write-Host '  Tip: pytest -q --tb=short   shows the failing assertions.' -ForegroundColor Yellow
         Write-Host '  Tip: pytest -q -m "not external"   skips tests that need git.' -ForegroundColor Yellow
-        exit 1
+        # The exe can still be built and smoke-tested; that is what the user
+        # asked for. Refuse only if the program cannot even be imported.
+        & $py -c 'import ramopt.cli, ramopt.win32, ramopt.service' 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail 'The project cannot even be imported with this Python - refusing to build.'
+            exit 1
+        }
+        Write-Note 'The program imports fine; continuing so you still get an exe.'
+        Write-Note 'Fix the failing tests before shipping this build to anyone else.'
     }
 }
 

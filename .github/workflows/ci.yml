@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        python-version: ["3.9", "3.11", "3.13", "3.15"]
     steps:
       - uses: actions/checkout@v4
 
@@ -70,12 +70,18 @@ jobs:
   # ---------------------------------------------------------------------------
   windows:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 = the conservative choice; 3.15 = the newest that PyInstaller
+        # supports (requires_python <3.16). Both build the real exe.
+        python-version: ["3.11", "3.15"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Install
@@ -182,7 +188,7 @@ jobs:
       - name: Upload build/ (exe + control panel) as an artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RamOptimizerService-windows
+          name: RamOptimizerService-windows-${{ matrix.python-version }}
           path: |
             build/RamOptimizerService/
             !build/RamOptimizerService/README.txt

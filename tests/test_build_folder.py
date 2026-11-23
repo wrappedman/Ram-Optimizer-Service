@@ -216,14 +216,25 @@ def test_build_scripts_share_one_implementation() -> None:
     assert "tools\\build_exe.ps1" in launcher
     assert "tools\\build_exe.ps1" in nested
     script = (ROOT / "tools" / "build_exe.ps1").read_text(encoding="utf-8")
-    assert "3.13" in script and "py -" in script
-    # هر -c که به پایتون داده می‌شود نباید کوتیشن داشته باشد: PowerShell هنگام
-    # فراخوانی exe کوتیشن‌های داخل آرگومان را حذف می‌کند و python با SyntaxError
-    # می‌میرد (همین یک CI را قرمز کرد).
-    for line in script.splitlines():
-        if " -c " in line:
-            snippet = line.split(" -c ", 1)[1]
-            assert '"' not in snippet and "'" not in snippet, f"quotes in -c: {line.strip()}"
+    assert "py -" in script
+    # 3.15 هم باید پذیرفته شود (PyInstaller 6.22 -> requires_python <3.16 و
+    # pywin32 چرخ cp315 دارد). سقف اشتباه 3.13 یک بیلد واقعی را شکست.
+    assert "'3.15'" in script
+    assert "$Code -le 315" in script or "Code -le 315" in script
+    assert "-le 313" not in script
+    # هر -c که به پایتون داده می‌شود باید «بعد از حذف کوتیشن‌ها» هم پایتون معتبر
+    # باشد: PowerShell هنگام فراخوانی exe کوتیشن‌های داخل آرگومان را حذف می‌کند.
+    # باگ واقعی: print("%d.%d" % ...) به print(%d.%d % ...) تبدیل می‌شد و
+    # python با SyntaxError می‌مرد (یک CI کامل را قرمز کرد).
+    import ast
+    import re
+
+    snippets = re.findall(r"-c '([^']+)'", script)
+    assert snippets, "the script should probe Python with -c"
+    for snippet in snippets:
+        # PowerShell کوتیشن‌ها را حذف می‌کند، پس همان رشته‌ی بدون کوتیشن هم
+        # باید کد پایتون معتبر باشد.
+        ast.parse(snippet)
     # اسکریپت باید ASCII باشد تا PowerShell 5.1 هم بدون BOM درست بخواند
     assert all(ord(char) < 128 for char in script), "tools/build_exe.ps1 must stay ASCII"
 

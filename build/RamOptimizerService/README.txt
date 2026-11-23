@@ -11,7 +11,7 @@ exe در git نیست چون هر بیلد ~۱۰ مگابایت است و با �
 
 ۲) از CI (بدون نیاز به Python روی ماشین شما):
        GitHub → Actions → آخرین اجرای سبز → Artifacts →
-       RamOptimizerService-windows
+       RamOptimizerService-windows-3.15  (یا -3.11)
    فایل zip را باز کنید و محتوای آن را همین‌جا بریزید. ساختار داخل zip:
        RamOptimizerService/RamOptimizerService.exe
        Manage-RamOptimizer.bat

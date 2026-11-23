@@ -61,10 +61,12 @@
 
 ## نصب سریع (exe)
 
-1. **`build_exe.bat`** را دابل‌کلیک کنید. Python **۳.۹ تا ۳.۱۳** لازم است
-   (PyInstaller فعلاً ۳.۱۴+ را پشتیبانی نمی‌کند)؛ اسکریپت خودش نسخه‌ی مناسب را
-   با `py -3.13`/`py -3.11`/… پیدا می‌کند و اگر نبود راهنمای نصب می‌دهد.
-   برای انتخاب دستی: `build_exe.bat -Python "py -3.11"`.
+1. **`build_exe.bat`** را دابل‌کلیک کنید. Python **۳.۹ تا ۳.۱۵** کار می‌کند
+   (PyInstaller 6.22 تا `<3.16` را پشتیبانی می‌کند و pywin32 چرخ cp315 دارد)،
+   پس اگر روی ماشینت فقط ۳.۱۵ نصب است نیازی به نصب نسخه‌ی دیگری نداری.
+   اسکریپت نسخه‌ی موجود را خودش پیدا می‌کند و قبل از بیلد با
+   `PyInstaller --version` واقعاً بررسی می‌کند که کار می‌کند.
+   برای انتخاب دستی: `build_exe.bat -Python "py -3.13"`.
 2. سرویس ساخته می‌شود در **`build\RamOptimizerService\RamOptimizerService.exe`**.
 3. **`build\Manage-RamOptimizer.bat`** را دابل‌کلیک کنید و گزینه‌ی **۱ (نصب)**
    را بزنید؛ در پنجره‌ی UAC گزینه‌ی Yes.
@@ -356,18 +358,20 @@ installer/          اسکریپت Inno Setup
 
 ## عیب‌یابی
 
-**خطای بیلد: «No runtime installed that matches 3.13» یا «No supported Python found»**
+**خطای بیلد: «No usable Python found» یا «PyInstaller cannot run with this Python»**
 
-یعنی روی سیستم فقط Python ۳.۱۴+ نصب است (یا نسخه‌ی ۳.۹–۳.۱۳ در PATH نیست).
-سه راه:
+یعنی هیچ مفسر ۳.۹–۳.۱۵ پیدا نشد، یا PyInstaller با نسخه‌ی موجود کار نکرد.
+راه‌ها:
 
 ```bat
-py install 3.11                 :: اگر Python Launcher داری
-build_exe.bat -Python "py -3.11"
+build_exe.bat                  :: اول همین را با مفسر فعلی امتحان کن
+py install 3.13                :: اگر Python Launcher داری (نسخه‌ی محافظه‌کارانه)
+build_exe.bat -Python "py -3.13"
 ```
 
 یا اصلاً بیلد نکن: از GitHub → Actions → آخرین اجرای سبز → Artifacts →
-`RamOptimizerService-windows` دانلود کن و محتوای zip را در `build\` بریز.
+`RamOptimizerService-windows-3.15` (یا `-3.11`) را دانلود کن و محتوای zip را
+در `build\` بریز.
 
 **خطای «The service did not respond to the start or control request in a timely fashion»**
 
