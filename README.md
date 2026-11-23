@@ -99,6 +99,7 @@ build\
 | ۱۱ | توقف/ادامه‌ی پاک‌سازی (سرویس روشن می‌ماند) |
 | ۱۲ | عیب‌یابی (نسخه، دسترسی، وضعیت سرویس) |
 | ۱۳ | **بررسی سناریو**: هر یک دقیقه + فوری در وضعیت بحرانی |
+| ۱۴ | **تعمیر نصب**: مسیر exe و تنظیمات سرویس را اصلاح می‌کند |
 | ۰ | خروج |
 
 نمای واقعی پنل (متن انگلیسی است تا در هر code page درست دیده شود):
@@ -126,6 +127,7 @@ build\
   INSPECT
     8  Dry run (no changes)           9  Configuration
    12  Diagnostics                   13  Behaviour check
+   14  Repair installation
 
     0  Exit
 ```
@@ -138,6 +140,7 @@ build\Manage-RamOptimizer.bat remove
 build\Manage-RamOptimizer.bat status
 build\Manage-RamOptimizer.bat logs -Lines 200
 build\Manage-RamOptimizer.bat doctor
+build\Manage-RamOptimizer.bat repair     # اصلاح مسیر exe بعد از جابه‌جایی
 build\Manage-RamOptimizer.bat verify   # سناریوی هر یک دقیقه / بحرانی = فوری
 ```
 

@@ -84,13 +84,15 @@ non-ASCII output.)
   INSPECT
     8  Dry run (no changes)   9  Configuration
    12  Diagnostics           13  Behaviour check
+   14  Repair installation
 
     0  Exit
 ```
 
 Menu items: 1 install, 2 remove, 3 status, 4 logs, 5-7 start/stop/restart,
 8 dry run, 9 config file, 10 reload config, 11 pause/resume trimming,
-12 diagnostics, 13 verify the 1-minute/critical behaviour, 0 exit.
+12 diagnostics, 13 verify the 1-minute/critical behaviour, 14 repair
+the installed service's exe path, 0 exit.
 
 ### Or use the installer
 
