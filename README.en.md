@@ -27,7 +27,7 @@ Persian documentation (کامل‌تر): [README.md](README.md).
 ### Build the executable
 
 ```bat
-build_exe.bat        :: needs Python 3.9+ in PATH
+build_exe.bat        :: needs Python 3.9 - 3.13 (PyInstaller has no 3.14 support yet)
 ```
 
 The script creates a virtual environment, installs build requirements, runs the

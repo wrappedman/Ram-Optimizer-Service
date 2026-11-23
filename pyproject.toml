@@ -49,6 +49,7 @@ testpaths = ["tests"]
 addopts = "-ra"
 markers = [
   "windows: test requires a real Windows API (skipped elsewhere)",
+  "external: needs an external tool (git); skipped when it is not installed",
 ]
 
 [tool.ruff]

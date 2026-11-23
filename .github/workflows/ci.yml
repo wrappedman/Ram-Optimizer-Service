@@ -83,9 +83,20 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
+      - name: Make git available to the tests (runner images sometimes lack it)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            choco install git --no-progress -y | Out-Null
+            $env:Path = "C:\Program Files\Git\cmd;$env:Path"
+          }
+          git --version
+
       - name: Pytest (including Windows-only tests)
         run: pytest -q --tb=short 2>&1 | Tee-Object -FilePath pytest-out.txt; exit $LASTEXITCODE
         shell: pwsh
+        env:
+          RAMOPT_REQUIRE_GIT_TESTS: "1"
 
       - name: Publish failure as annotation (readable without log access)
         if: failure()

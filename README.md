@@ -61,7 +61,7 @@
 
 ## نصب سریع (exe)
 
-1. **`build_exe.bat`** را دابل‌کلیک کنید (Python 3.9+ باید در PATH باشد).
+1. **`build_exe.bat`** را دابل‌کلیک کنید (Python **۳.۹ تا ۳.۱۳**؛ PyInstaller فعلاً ۳.۱۴ را پشتیبانی نمی‌کند — اسکریپت خودش نسخه‌ی مناسب را پیدا می‌کند).
 2. سرویس ساخته می‌شود در **`build\RamOptimizerService\RamOptimizerService.exe`**.
 3. **`build\Manage-RamOptimizer.bat`** را دابل‌کلیک کنید و گزینه‌ی **۱ (نصب)**
    را بزنید؛ در پنجره‌ی UAC گزینه‌ی Yes.
@@ -321,6 +321,7 @@ python -m venv .venv
 pip install -r requirements-dev.txt
 
 pytest -q                          # ۱۰۰+ تست (بخش ویندوزی روی لینوکس skip می‌شود)
+pytest -q -m "not git"             # بدون تست‌های وابسته به git (روی ماشین بدون git)
 ruff check . && ruff format --check .
 mypy ramopt
 

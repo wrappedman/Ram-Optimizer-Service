@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import ctypes
+import pathlib
 
 from ramopt import win32
 
@@ -23,10 +24,22 @@ def test_ntstatus_accepts_signed_and_unsigned_values():
     assert win32.ntstatus_name(0x80000005).startswith("NTSTATUS 0x80000005")
 
 
-def test_wintypes_has_no_hresult_so_we_do_not_use_it():
-    """``ctypes.wintypes.HRESULT`` روی ویندوز هم وجود ندارد؛ استفاده از آن
-    کل بارگذاری ماژول را می‌شکست (اولین اجرای CI ویندوز این را پیدا کرد)."""
-    assert not hasattr(ctypes.wintypes, "HRESULT")
+def test_win32_module_never_depends_on_wintypes_hresult():
+    """``ramopt.win32`` نباید به ``ctypes.wintypes.HRESULT`` تکیه کند.
+
+    داستان واقعی: روی پایتون ۳.۹–۳.۱۳ (که CI و build_exe.bat استفاده می‌کنند)
+    ``wintypes.HRESULT`` وجود ندارد و استفاده از آن کل بارگذاری ماژول را
+    می‌شکست. از پایتون ۳.۱۴ به بعد این نام اضافه شده است، پس تستِ
+    «وجود ندارد» روی سیستم کاربر (۳.۱۵) شکست می‌خورد بدون این‌که هیچ باگی در
+    برنامه باشد. چیزی که واقعاً مهم است این است: کد ما به آن وابسته نباشد.
+    """
+    module_level = (pathlib.Path(__file__).parent.parent / "ramopt" / "win32.py").read_text(
+        encoding="utf-8"
+    )
+    code = [line for line in module_level.splitlines() if not line.lstrip().startswith("#")]
+    assert "wintypes.HRESULT" not in "\n".join(code)
+    # هر جا HRESULT لازم است، عرض ثابت کافی است
+    assert "ctypes.c_long" in module_level or "c_int32" in module_level
 
 
 def test_structures_are_packed_for_windows_abi():

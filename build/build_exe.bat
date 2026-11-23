@@ -12,23 +12,52 @@ setlocal EnableExtensions EnableDelayedExpansion
 title Build RamOptimizerService
 cd /d "%~dp0.."
 
-where python >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Python was not found in PATH.
-    echo         Install Python 3.9+ from https://www.python.org/downloads/
-    echo         and tick "Add python.exe to PATH" during setup.
+:: --- 0) Find a supported Python -------------------------------------------
+:: PyInstaller and this project support 3.9 - 3.13. If PATH only exposes a
+:: newer Python (3.14+), the build fails with confusing errors deep inside
+:: PyInstaller, so we look for a supported one first and say so clearly.
+set "PYEXE="
+for %%V in (3.13 3.12 3.11 3.10 3.9) do (
+    if not defined PYEXE (
+        py -%%V -c "import sys" >nul 2>&1
+        if not errorlevel 1 set "PYEXE=py -%%V"
+    )
+)
+if not defined PYEXE (
+    where python >nul 2>&1
+    if not errorlevel 1 (
+        for /f "delims=" %%O in ('python -c "import sys;print(sys.version_info[0]*100+sys.version_info[1])"') do set "PYVER=%%O"
+        if defined PYVER if !PYVER! LSS 314 set "PYEXE=python"
+    )
+)
+if not defined PYEXE (
+    echo [ERROR] No supported Python found ^(3.9 - 3.13^).
+    echo         PyInstaller does not support 3.14+ yet, and this project targets 3.9+.
+    echo         Install Python 3.11 from https://www.python.org/downloads/
+    echo         ^(tick "Add python.exe to PATH"^), or run:  py -3.11 build_exe.bat
+    echo.
+    echo         Detected "python": 
+    python -c "import sys;print('  ', sys.version)" 2>nul
     pause
     exit /b 1
 )
+echo [0/6] Using %PYEXE%
 
 if not exist ".venv\Scripts\python.exe" (
     echo [1/6] Creating virtual environment...
-    python -m venv .venv
+    %PYEXE% -m venv .venv
     if errorlevel 1 goto :fail
 ) else (
     echo [1/6] Using existing virtual environment.
 )
 set "PY=.venv\Scripts\python.exe"
+"%PY%" -c "import sys; assert sys.version_info[:2] <= (3, 13), 'venv has an unsupported Python: ' + sys.version" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] .venv was created with Python 3.14+ ^(unsupported by PyInstaller^).
+    echo         Delete the .venv folder and run this script again.
+    pause
+    exit /b 1
+)
 
 echo [2/6] Installing build requirements...
 "%PY%" -m pip install --upgrade pip >nul 2>&1

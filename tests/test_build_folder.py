@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import subprocess
@@ -36,41 +37,54 @@ def test_control_panel_files_exist() -> None:
         assert path.stat().st_size > 0
 
 
-def test_build_folder_is_not_ignored_but_exe_is() -> None:
-    """``build/`` نباید ignore شود، ولی exeهای داخل آن نباید وارد git شوند."""
-    check = subprocess.run(
-        ["git", "check-ignore", "-v", "build/RamOptimizerService/RamOptimizerService.exe"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if check.returncode not in (0, 1):  # git در دسترس نیست
-        pytest.skip("git is not available")
-    if check.returncode != 0:
-        # هنوز بیلدی انجام نشده؛ همان قاعده را با یک مسیر فرضی بسنج
-        check = subprocess.run(
-            ["git", "check-ignore", "-v", "build/RamOptimizerService/RamOptimizerService.exe"],
-            cwd=ROOT,
+def _git_check_ignore(path: str) -> subprocess.CompletedProcess | None:
+    """اجرای ``git check-ignore``؛ اگر git نصب نباشد ``None``.
+
+    مهم: روی ویندوزی که Git for Windows نصب نیست (یا PATH عوض شده) اجرای
+    ``git`` با ``FileNotFoundError`` شکست می‌خورد و بیلد را می‌خواباند —
+    در حالی که این تست درباره‌ی خودِ برنامه چیزی نمی‌گوید. پس نبودِ git
+    یعنی «قابل بررسی نیست»، نه «شکست».
+    """
+    try:
+        return subprocess.run(
+            ["git", "check-ignore", "-v", path],
+            cwd=str(ROOT),
             capture_output=True,
             text=True,
+            timeout=30,
         )
-        assert "build/RamOptimizerService/*" in check.stdout or check.returncode == 0
-    # README راهنما باید نسخه‌بندی شود تا پوشه خالی نماند
-    note = subprocess.run(
-        ["git", "check-ignore", "build/RamOptimizerService/README.txt"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert note.returncode == 1, "build/RamOptimizerService/README.txt must not be ignored"
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return None
 
-    panel = subprocess.run(
-        ["git", "check-ignore", "build/RamOptimizerControl.ps1"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert panel.returncode == 1, "build/RamOptimizerControl.ps1 must not be ignored"
+
+def test_exe_output_is_not_committed_but_the_panel_is() -> None:
+    """قاعده‌ی ignore را از فایل می‌خوانیم (بدون نیاز به git).
+
+    چرا نه ``git check-ignore``؟ چون روی ماشینی که git در PATH نیست تست
+    شکست می‌خورد، و روی ماشینی که خودِ پروژه زیرمجموعه‌ی یک ریپوی دیگر است
+    ممکن است قاعده‌ی والد جواب بدهد. منبع حقیقت همان ``.gitignore`` است.
+    """
+    rules = [
+        line.strip()
+        for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert "build/RamOptimizerService/*" in rules, "the built exe must stay out of Git"
+    assert "!build/RamOptimizerService/README.txt" in rules, "the folder guide must be committed"
+    # قاعده‌ی خیلی کلی «build/» نباید برگردد؛ وگرنه کل پنل ignore می‌شود
+    assert "build/" not in rules
+
+    # اگر git در دسترس بود، ادعا را با خودش هم بسنجیم
+    result = _git_check_ignore("build/RamOptimizerService/RamOptimizerService.exe")
+    if result is None:
+        if os.environ.get("RAMOPT_REQUIRE_GIT_TESTS") == "1":
+            pytest.fail("git لازم است ولی در PATH نیست (RAMOPT_REQUIRE_GIT_TESTS=1)")
+        pytest.skip("git در PATH نیست؛ قاعده از .gitignore بررسی شد")
+    if result.returncode not in (0, 1):
+        pytest.skip(f"git check-ignore قابل استفاده نیست: {result.stderr.strip()[:80]}")
+    assert result.returncode == 0, "the built exe must stay out of Git"
+    assert result.returncode == 0 and "*" in result.stdout
+    assert _git_check_ignore("build/RamOptimizerControl.ps1").returncode == 1
 
 
 def test_bat_launches_the_powershell_panel() -> None:
@@ -136,3 +150,16 @@ def test_docs_mention_the_critical_path() -> None:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+#: تست‌هایی که به یک ابزار بیرونی (git) نیاز دارند. روی ماشینی که git ندارد
+#: با ``pytest -m "not external"`` کنار گذاشته می‌شوند.
+EXTERNAL = pytest.mark.external
+
+
+@EXTERNAL
+def test_git_is_present_when_required() -> None:
+    """در CI ویندوز، خودِ وجود git هم بررسی می‌شود (وگرنه تست ignore بی‌صدا skip می‌شد)."""
+    if os.environ.get("RAMOPT_REQUIRE_GIT_TESTS") != "1":
+        pytest.skip("RAMOPT_REQUIRE_GIT_TESTS=1 تنظیم نشده است")
+    assert _git_check_ignore("build/RamOptimizerControl.ps1") is not None, "git در PATH نیست"
