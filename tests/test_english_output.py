@@ -47,7 +47,9 @@ def _user_facing_strings(path: pathlib.Path) -> list[tuple[int, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute | ast.Name):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, (ast.Attribute, ast.Name)):
             continue
         name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr
         is_logger = name in {"debug", "info", "warning", "error", "exception", "critical"}
