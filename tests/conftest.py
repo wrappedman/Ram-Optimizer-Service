@@ -238,6 +238,30 @@ def base_config() -> Config:
 
 
 @pytest.fixture(autouse=True)
+def _capture_ramopt_logs():
+    """``logger.propagate = False`` در ``logging_setup`` باعث می‌شود caplog
+    هیچ رکوردی از ماژول‌های ramopt نبیند (و این به ترتیب اجرای تست‌ها وابسته
+    بود: تا وقتی ``setup_logging`` صدا زده نشده بود کار می‌کرد).
+
+    اینجاد propagation را برای طول هر تست روشن می‌کنیم تا ``caplog`` همیشه
+    کار کند، و بعد از تست وضعیت اصلی را برمی‌گردانیم.
+    """
+    import logging
+
+    logger = logging.getLogger("RamOptimizer")
+    previous = logger.propagate
+    previous_level = logger.level
+    logger.propagate = True
+    if logger.level == logging.NOTSET or logger.level > logging.DEBUG:
+        logger.setLevel(logging.DEBUG)
+    try:
+        yield
+    finally:
+        logger.propagate = previous
+        logger.setLevel(previous_level)
+
+
+@pytest.fixture(autouse=True)
 def isolated_data_dir(tmp_path, monkeypatch):
     """همه‌ی تست‌ها در پوشه‌ی موقت خودشان کار کنند (هیچ فایلی جای دیگر نوشته نشود)."""
     data = tmp_path / "data"
