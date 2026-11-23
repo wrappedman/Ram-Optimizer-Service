@@ -414,9 +414,7 @@ def cmd_verify(args) -> int:
     _print("سناریوی درخواستی")
     _print(f"  ۱) آزادسازی خودکار هر {interval} ثانیه در حالت عادی")
     _print(f"  ۲) به‌محض رسیدن مصرف به {threshold}% → همان لحظه (بدون انتظار)")
-    _print(
-        f"     حتی وسط خواب یک‌دقیقه‌ای: پایش سبک هر {config.critical_probe_seconds} ثانیه"
-    )
+    _print(f"     حتی وسط خواب یک‌دقیقه‌ای: پایش سبک هر {config.critical_probe_seconds} ثانیه")
     _print(f"     و بعد از آن بررسی هر {critical_poll} ثانیه تا پایین آمدن")
     _print("")
     _print("پیکربندی مؤثر")
