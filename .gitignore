@@ -1,0 +1,31 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- PyInstaller / build output ---
+release/
+installer/Output/
+installer/*.exe
+*.spec.bak
+version_info_stamp.py
+
+# --- Windows ---
+Thumbs.db
+Desktop.ini
+*.log
+crash.log
+version_info.txt

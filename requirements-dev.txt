@@ -1,0 +1,7 @@
+# ابزارهای توسعه و ساخت exe/نصب‌کننده
+# Development / build requirements (not needed to *run* the program).
+-r requirements.txt
+pytest>=8
+ruff>=0.6
+mypy>=1.11
+pyinstaller>=6.0; sys_platform == "win32"

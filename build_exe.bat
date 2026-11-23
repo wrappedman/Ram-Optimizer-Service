@@ -1,70 +1,105 @@
 @echo off
-setlocal EnableExtensions
-title Build RamOptimizerService.exe
+setlocal EnableExtensions EnableDelayedExpansion
+title Build RamOptimizerService
 cd /d "%~dp0"
 
 echo ============================================================
-echo   RamOptimizer - Build EXE (onedir mode - service friendly)
-echo   Needs: Windows 10/11 x64 + Python 3.8+ added to PATH
+echo   RAM Optimizer Service - Build
+echo   Requirements: Windows 10/11 x64, Python 3.9+ in PATH
 echo ============================================================
 echo.
 
 where python >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Python was not found in PATH.
-    echo         Install Python 3.8+ from https://www.python.org/downloads/
-    echo         and CHECK the "Add python.exe to PATH" option during setup.
+    echo         Install Python 3.9+ from https://www.python.org/downloads/
+    echo         and tick "Add python.exe to PATH" during setup.
     pause
     exit /b 1
 )
 
-echo [1/4] Upgrading pip...
-python -m pip install --upgrade pip >nul
+:: ---------------------------------------------------------------
+:: 1) Virtual environment (بدون آلوده کردن پایتون سیستم)
+:: ---------------------------------------------------------------
+if not exist ".venv\Scripts\python.exe" (
+    echo [1/6] Creating virtual environment...
+    python -m venv .venv
+    if errorlevel 1 goto :fail
+) else (
+    echo [1/6] Using existing virtual environment.
+)
+set "PY=.venv\Scripts\python.exe"
 
-echo [2/4] Installing requirements (psutil, pywin32, pyinstaller)...
-python -m pip install -r requirements.txt
+echo [2/6] Installing build requirements...
+"%PY%" -m pip install --upgrade pip >nul 2>&1
+"%PY%" -m pip install -r requirements-dev.txt
 if errorlevel 1 goto :fail
 
-:: A third-party PyPI package literally named "servicemanager", if present,
-:: SHADOWS pywin32's own servicemanager module inside the frozen exe and
-:: causes exactly the "service did not respond in a timely fashion" error.
-:: Make sure it is not installed.
-python -m pip show servicemanager >nul 2>&1
+:: A third-party PyPI package literally named "servicemanager" SHADOWS
+:: pywin32's own servicemanager inside the frozen exe and causes exactly the
+:: "service did not respond in a timely fashion" error. Make sure it is gone.
+"%PY%" -m pip show servicemanager >nul 2>&1
 if not errorlevel 1 (
     echo Removing conflicting PyPI package "servicemanager"...
-    python -m pip uninstall -y servicemanager
+    "%PY%" -m pip uninstall -y servicemanager
 )
 
-echo [3/4] Building with PyInstaller...
-:: NOTE: We intentionally do NOT use --onefile. A single-file exe unpacks
-:: itself to TEMP on every start and Windows' Service Control Manager often
-:: fails to connect to it in time ("service did not respond..."). A onedir
-:: build starts instantly and directly as the service process.
-python -m PyInstaller --clean --noconfirm ^
-    --name RamOptimizerService ^
-    --noupx ^
-    --hidden-import win32timezone ^
-    ram_optimizer_service.py
+:: ---------------------------------------------------------------
+:: 2) Tests - if the suite fails, do not ship a broken build
+:: ---------------------------------------------------------------
+echo [3/6] Running the test suite...
+"%PY%" -m pytest -q
+if errorlevel 1 (
+    echo [ERROR] Tests failed - fix them before building.
+    goto :fail
+)
+
+:: ---------------------------------------------------------------
+:: 3) Version info (so the exe has a real version in Explorer)
+:: ---------------------------------------------------------------
+echo [4/6] Generating version_info.txt...
+"%PY%" tools\make_version_info.py
 if errorlevel 1 goto :fail
 
-echo [4/4] Preparing the "release" folder...
+:: ---------------------------------------------------------------
+:: 4) Build (onedir - see RamOptimizerService.spec for why)
+:: ---------------------------------------------------------------
+echo [5/6] Building with PyInstaller...
+"%PY%" -m PyInstaller --clean --noconfirm RamOptimizerService.spec
+if errorlevel 1 goto :fail
+
+:: ---------------------------------------------------------------
+:: 5) Release folder
+:: ---------------------------------------------------------------
+echo [6/6] Preparing the "release" folder...
 if not exist release mkdir release
 if exist "release\RamOptimizerService" rmdir /s /q "release\RamOptimizerService"
 xcopy "dist\RamOptimizerService" "release\RamOptimizerService\" /E /I /Y /Q >nul
 if errorlevel 1 goto :fail
-copy /y "install_service.bat"          "release\" >nul
-copy /y "uninstall_service.bat"        "release\" >nul
-copy /y "install_task.bat"             "release\" >nul
-copy /y "uninstall_task.bat"           "release\" >nul
-copy /y "README.md"                    "release\" >nul
+
+copy /y "install_service.bat"   "release\" >nul
+copy /y "uninstall_service.bat" "release\" >nul
+copy /y "install_task.bat"      "release\" >nul
+copy /y "uninstall_task.bat"    "release\" >nul
+copy /y "README.md"             "release\" >nul
+copy /y "README.en.md"          "release\" >nul
+"%PY%" -c "from ramopt.config import default_config_text; open(r'release\config.ini.example','w',encoding='utf-8').write(default_config_text())"
+copy /y "LICENSE"               "release\" >nul
+if exist "CHANGELOG.md" copy /y "CHANGELOG.md" "release\" >nul
+
+:: Checksums so users can verify what they got
+if exist "release\SHA256SUMS.txt" del "release\SHA256SUMS.txt"
+for %%F in ("release\RamOptimizerService\RamOptimizerService.exe") do (
+    certutil -hashfile "%%~fF" SHA256 | findstr /v /c:"hash" /c:"CertUtil" >> "release\SHA256SUMS.txt"
+)
 
 echo.
 echo ============================================================
 echo   BUILD OK. Everything you need is in the "release" folder:
 echo     release\RamOptimizerService\RamOptimizerService.exe
-echo     release\install_service.bat   (just double-click it)
-echo     release\uninstall_service.bat
+echo     release\install_service.bat   (double-click, then Yes on UAC)
 echo ============================================================
+echo.
 pause
 exit /b 0
 
