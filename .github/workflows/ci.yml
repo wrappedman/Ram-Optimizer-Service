@@ -111,7 +111,8 @@ jobs:
         run: |
           # Run the same script users run, so a broken build script fails CI.
           # -SkipTests: the suite already ran above.
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_exe.ps1 -SkipTests
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_exe.ps1 -SkipTests 2>&1 |
+            Tee-Object -FilePath build-log.txt
           if ($LASTEXITCODE -ne 0) { throw "build_exe.ps1 failed with $LASTEXITCODE" }
           if (-not (Test-Path build\RamOptimizerService\RamOptimizerService.exe)) {
             throw "build_exe.ps1 did not produce the exe"
@@ -164,6 +165,17 @@ jobs:
           if ($out -notmatch 'هر 60 ثانیه') { throw "the 60 s cycle is not reported" }
           if ($out -notmatch 'T\+0s') { throw "the immediate critical pass is not reported" }
           if ($out -notmatch 'critical=True') { throw "the critical decision did not fire" }
+
+      - name: Publish failure as annotation (any step)
+        if: failure()
+        shell: pwsh
+        run: |
+          foreach ($file in @('build-log.txt', 'pytest-out.txt')) {
+            if (Test-Path $file) {
+              Write-Output "::error::$file"
+              Get-Content $file -Tail 50 | ForEach-Object { Write-Output "::error::$_" }
+            }
+          }
 
       - name: Upload build/ (exe + control panel) as an artifact
         uses: actions/upload-artifact@v4

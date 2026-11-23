@@ -1,4 +1,5 @@
 # Batch files must keep CRLF line endings (cmd.exe mangles LF-only files).
 *.bat text eol=crlf
-*.ps1 text eol=crlf
 *.cmd text eol=crlf
+# The panel is stored with a UTF-8 BOM and CRLF; git must not strip either.
+build/RamOptimizerControl.ps1 -text

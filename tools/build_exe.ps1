@@ -34,6 +34,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:Root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+# Interpreter + launcher arguments chosen in step 0 ("py" + "-3.11", or "python").
+$script:PrefixExe = 'python'
+$script:PrefixArgs = @()
 $script:Supported = @(
     @{ Tag = '3.13'; Major = 3; Minor = 13 },
     @{ Tag = '3.12'; Major = 3; Minor = 12 },
@@ -41,11 +44,9 @@ $script:Supported = @(
     @{ Tag = '3.10'; Major = 3; Minor = 10 },
     @{ Tag = '3.9'; Major = 3; Minor = 9 }
 )
-#: PyInstaller has no support for 3.14+ yet; anything newer is unusable here.
-$script:MaxMajor = 3
-$script:MaxMinor = 13
 
 function Write-Step([string]$Text) { Write-Host "[build] $Text" -ForegroundColor Cyan }
+
 function Write-Ok([string]$Text) { Write-Host "[ OK ]  $Text" -ForegroundColor Green }
 function Write-Note([string]$Text) { Write-Host "[ .. ]  $Text" -ForegroundColor Yellow }
 function Write-Fail([string]$Text) { Write-Host "[FAIL]  $Text" -ForegroundColor Red }
@@ -145,12 +146,16 @@ if ($reuseVenv) {
 } else {
     Write-Step "1/6 creating .venv with '$chosen'"
     $parts = $chosen.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
-    $exe = $parts[0]
-    $prefix = @()
-    if ($parts.Length -gt 1) { $prefix = $parts[1..($parts.Length - 1)] }
-    & $exe @prefix -m venv .venv
+    $script:PrefixExe = $parts[0]
+    $script:PrefixArgs = @()
+    if ($parts.Length -gt 1) { $script:PrefixArgs = $parts[1..($parts.Length - 1)] }
+    & $script:PrefixExe @script:PrefixArgs -m venv .venv
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $venvPython)) {
         Write-Fail 'Creating the virtual environment failed (see the message above).'
+        Write-Host "  Tried: $chosen -m venv .venv" -ForegroundColor Yellow
+        Write-Host '  Workaround: create the environment yourself, then rerun:' -ForegroundColor Yellow
+        Write-Host '     py -3.11 -m venv .venv' -ForegroundColor Yellow
+        Write-Host '     build_exe.bat' -ForegroundColor Yellow
         exit 1
     }
 }
@@ -189,6 +194,8 @@ if ($SkipTests) {
     & $py -m pytest -q
     if ($LASTEXITCODE -ne 0) {
         Write-Fail 'Tests failed - not shipping a broken build.'
+        Write-Host '  Tip: pytest -q --tb=short   shows the failing assertions.' -ForegroundColor Yellow
+        Write-Host '  Tip: pytest -q -m "not external"   skips tests that need git.' -ForegroundColor Yellow
         exit 1
     }
 }
