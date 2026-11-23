@@ -171,10 +171,12 @@ jobs:
         shell: pwsh
         run: |
           foreach ($file in @('build-log.txt', 'pytest-out.txt')) {
-            if (Test-Path $file) {
-              Write-Output "::error::$file"
-              Get-Content $file -Tail 50 | ForEach-Object { Write-Output "::error::$_" }
-            }
+            if (-not (Test-Path $file)) { continue }
+            Write-Output "::error::$file"
+            # Lines that explain the failure first, then the tail for context.
+            Get-Content $file | Select-String -Pattern 'ERROR|error:|Traceback|FAIL|Exception|not found' |
+              Select-Object -Last 25 | ForEach-Object { Write-Output "::error::$($_.Line)" }
+            Get-Content $file -Tail 25 | ForEach-Object { Write-Output "::error::$_" }
           }
 
       - name: Upload build/ (exe + control panel) as an artifact
