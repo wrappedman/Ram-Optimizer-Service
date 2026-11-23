@@ -50,3 +50,26 @@ def test_counter_structure_sizes():
 
 def _is_x64() -> bool:
     return ctypes.sizeof(ctypes.c_void_p) == 8
+
+
+def test_windows_only_test_file_only_references_existing_structures():
+    """تست ویندوزی نباید به ساختاری اشاره کند که وجود ندارد.
+
+    (اولین اجرای CI ویندوز همین را پیدا کرد: تست به
+    ``PROCESS_MEMORY_COUNTERS_EX`` اشاره می‌کرد که حذف شده بود و روی لینوکس
+    skip می‌شد، پس هیچ‌وقت دیده نشد.)
+    """
+    import ast
+    import pathlib
+
+    source = (pathlib.Path(__file__).parent / "test_windows_api.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    referenced = {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "win32"
+    }
+    missing = sorted(name for name in referenced if not hasattr(win32, name))
+    assert missing == [], f"این نام‌ها در ramopt.win32 وجود ندارند: {missing}"

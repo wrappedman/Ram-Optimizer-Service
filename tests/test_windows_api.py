@@ -27,12 +27,12 @@ pytestmark = [
 
 
 def test_struct_layouts_match_windows_abi():
+    """روی ویندوز، چیدمان باید دقیقاً با ABI مایکروسافت یکی باشد."""
     assert ctypes.sizeof(win32.MEMORYSTATUSEX) == 64
-    assert ctypes.sizeof(win32.PROCESS_MEMORY_COUNTERS_EX) == 88
     assert ctypes.sizeof(win32.SYSTEM_POWER_STATUS) == 12
-    # ساختار Memory List روی x64 (۸ اولویت × ۸ بایت + ۴ مقدار) ۱۶۰ بایت است
+    assert ctypes.sizeof(win32.PROCESS_MEMORY_COUNTERS) == 72
     if ctypes.sizeof(ctypes.c_void_p) == 8:
-        assert ctypes.sizeof(win32.SYSTEM_MEMORY_LIST_INFORMATION) == (5 * 8 + 8 * 8 + 8 * 8 + 8)
+        assert ctypes.sizeof(win32.SYSTEM_MEMORY_LIST_INFORMATION) == 176
 
 
 def test_api_loads_and_reads_memory():
