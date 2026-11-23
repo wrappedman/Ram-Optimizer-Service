@@ -74,7 +74,7 @@ def _run(args: list[str]) -> tuple[int, str]:
 
 def install(wait_seconds: int = 0) -> int:
     if sys.platform != "win32":
-        _log("این دستور فقط روی ویندوز کار می‌کند.")
+        _log("this command only works on Windows.")
         return EXIT_ERROR
 
     import pywintypes
@@ -85,11 +85,11 @@ def install(wait_seconds: int = 0) -> int:
     if not getattr(sys, "frozen", False):
         script = os.path.join(_project_root(), "ram_optimizer_service.py")
         if not os.path.isfile(script):
-            _log(f"[خطا] اسکریپت سرویس پیدا نشد: {script}")
+            _log(f"[error] service script not found: {script}")
             return EXIT_ERROR
 
     image_path = _command_line(exe, script)
-    _log(f"نصب سرویس با ImagePath = {image_path}")
+    _log(f"installing the service with ImagePath = {image_path}")
 
     hscm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ALL_ACCESS)
     try:
@@ -100,9 +100,9 @@ def install(wait_seconds: int = 0) -> int:
             )
             win32service.CloseServiceHandle(hs_existing)
             _log(
-                f"سرویس «{SERVICE_NAME}» از قبل نصب است.\n"
-                "برای ارتقا از نسخه‌ی جدید:  ramopt service remove  سپس  ramopt service install\n"
-                "یا  ramopt service repair  (فقط مسیر exe و تنظیمات را اصلاح می‌کند)"
+                f'service "{SERVICE_NAME}" is already installed.\n'
+                "to upgrade to a newer build:  ramopt service remove  then  ramopt service install\n"
+                "or  ramopt service repair  (fixes only the exe path and settings)"
             )
             return EXIT_ERROR
         except pywintypes.error:
@@ -133,7 +133,9 @@ def install(wait_seconds: int = 0) -> int:
                     hs, win32service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO, True
                 )
             except win32service.error as exc:  # pragma: no cover
-                _log(f"⚠ delayed auto-start تنظیم نشد: {exc}. با auto معمولی ادامه می‌دهیم.")
+                _log(
+                    f"warning: could not set delayed auto-start: {exc}. Continuing with normal auto-start."
+                )
 
             # self-healing: اگر سرویس کرش کرد، ویندوز دوباره بالا بیاوردش
             try:
@@ -141,7 +143,7 @@ def install(wait_seconds: int = 0) -> int:
                     hs,
                     win32service.SERVICE_CONFIG_FAILURE_ACTIONS,
                     {
-                        "ResetPeriod": 24 * 60 * 60,  # شمارنده روزانه ریست شود
+                        "ResetPeriod": 24 * 60 * 60,  # reset the failure counter daily
                         "RebootMsg": "",
                         "Command": "",
                         "Actions": [
@@ -152,7 +154,7 @@ def install(wait_seconds: int = 0) -> int:
                     },
                 )
             except win32service.error as exc:  # pragma: no cover
-                _log(f"⚠ failure actions تنظیم نشد: {exc}")
+                _log(f"warning: could not set failure actions: {exc}")
             # failure actions روی «توقف با کد خطا» (نه فقط کرش) هم اعمال شود
             try:
                 win32service.ChangeServiceConfig2(
@@ -166,7 +168,7 @@ def install(wait_seconds: int = 0) -> int:
         win32service.CloseServiceHandle(hscm)
 
     _register_event_source()
-    _log("سرویس نصب شد (شروع خودکار با تأخیر + ری‌استارت خودکار در صورت خطا).")
+    _log("service installed (delayed auto-start + automatic restart on failure).")
 
     if wait_seconds >= 0:
         return start(wait_seconds or 20)
@@ -198,8 +200,8 @@ def _register_event_source() -> None:
     )
     if code != 0:
         _log(
-            "⚠ ثبت Event Source ناموفق "
-            f"(سرویس همچنان از Event Log عمومی استفاده می‌کند): {output.strip()}"
+            "warning: could not register the event source "
+            f"(the service still uses the generic event log): {output.strip()}"
         )
         return
     _run(
@@ -216,12 +218,12 @@ def _register_event_source() -> None:
             "/f",
         ]
     )
-    logger.debug("Event source ثبت شد.")
+    logger.debug("event source registered.")
 
 
 def remove(wait_seconds: int = 15) -> int:
     if sys.platform != "win32":
-        _log("این دستور فقط روی ویندوز کار می‌کند.")
+        _log("this command only works on Windows.")
         return EXIT_ERROR
     import pywintypes
     import win32service
@@ -233,12 +235,12 @@ def remove(wait_seconds: int = 15) -> int:
         try:
             hs = win32service.OpenService(hscm, SERVICE_NAME, win32service.SERVICE_ALL_ACCESS)
         except pywintypes.error:
-            _log(f"سرویس «{SERVICE_NAME}» نصب نیست — کاری لازم نبود.")
+            _log(f'service "{SERVICE_NAME}" is not installed - nothing to do.')
             _remove_event_source()
             return EXIT_OK
         try:
             win32service.DeleteService(hs)
-            _log("سرویس حذف شد.")
+            _log("service removed.")
         finally:
             win32service.CloseServiceHandle(hs)
     finally:
@@ -268,15 +270,17 @@ def start(wait_seconds: int = 20) -> int:
     try:
         hscm, hs = _open_service()
     except pywintypes.error as exc:
-        _log(f"[خطا] سرویس پیدا نشد ({exc.strerror}). اول نصب کنید: ramopt service install")
+        _log(
+            f"[error] service not found ({exc.strerror}). Install it first: ramopt service install"
+        )
         return EXIT_ERROR
     try:
         try:
             win32service.StartService(hs, None)
-            _log("دستور شروع ارسال شد…")
+            _log("start command sent...")
         except pywintypes.error as exc:
             if exc.winerror == 1056:  # ERROR_SERVICE_ALREADY_RUNNING
-                _log("سرویس از قبل در حال اجراست.")
+                _log("the service is already running.")
                 return EXIT_OK
             raise
     finally:
@@ -285,14 +289,14 @@ def start(wait_seconds: int = 20) -> int:
 
     state = _wait_for_state(win32service.SERVICE_RUNNING, wait_seconds)
     if state == win32service.SERVICE_RUNNING:
-        _log("سرویس در حال اجراست. ✔")
+        _log("the service is running.")
         _print_log_hint()
         return EXIT_OK
     _log(
-        "[خطا] سرویس در زمان مقرر به وضعیت RUNNING نرسید.\n"
-        f"   لاگ: {paths.log_file()}\n"
-        f"   کرش: {paths.crash_log_file()}\n"
-        '   برای دیدن خطای دقیق:  ramopt test --dry-run  یا  "<exe>" debug'
+        "[error] the service did not reach RUNNING in time.\n"
+        f"   log:  {paths.log_file()}\n"
+        f"   crash: {paths.crash_log_file()}\n"
+        '   for the exact error:  ramopt test --dry-run  or  "<exe>" debug'
     )
     return EXIT_ERROR
 
@@ -306,19 +310,19 @@ def stop(wait_seconds: int = 15) -> int:
     try:
         hscm, hs = _open_service()
     except pywintypes.error:
-        _log("سرویس نصب نیست.")
+        _log("the service is not installed.")
         return EXIT_OK
     try:
         try:
             win32service.ControlService(hs, win32service.SERVICE_CONTROL_STOP)
-            _log("دستور توقف ارسال شد…")
+            _log("stop command sent...")
         except pywintypes.error as exc:
             if exc.winerror == 1062:  # ERROR_SERVICE_NOT_ACTIVE
-                _log("سرویس در حال اجرا نبود.")
+                _log("the service was not running.")
                 return EXIT_OK
             raise
         _wait_for_state(win32service.SERVICE_STOPPED, wait_seconds, hs=hs)
-        _log("سرویس متوقف شد.")
+        _log("service stopped.")
         return EXIT_OK
     finally:
         win32service.CloseServiceHandle(hs)
@@ -339,22 +343,22 @@ def control(action: str, wait_seconds: int = 15) -> int:
     try:
         hscm, hs = _open_service()
     except pywintypes.error:
-        _log("سرویس نصب نیست.")
+        _log("the service is not installed.")
         return EXIT_ERROR
     try:
         if action == "query":
             status = win32service.QueryServiceStatus(hs)
-            _log(f"وضعیت: {_state_name(status[1])}  (checkpoint {status[4]})")
+            _log(f"state: {_state_name(status[1])}  (checkpoint {status[4]})")
             return EXIT_OK
         if code is None:
-            _log(f"دستور ناشناخته: {action}")
+            _log(f"unknown action: {action}")
             return EXIT_ERROR
         try:
             win32service.ControlService(hs, code)
-            _log(f"دستور {action} ارسال شد.")
+            _log(f"{action} command sent.")
             return EXIT_OK
         except pywintypes.error as exc:
-            _log(f"[خطا] {exc.strerror} ({exc.winerror})")
+            _log(f"[error] {exc.strerror} ({exc.winerror})")
             return EXIT_ERROR
     finally:
         win32service.CloseServiceHandle(hs)
@@ -403,13 +407,13 @@ def _state_name(state: int) -> str:
 
 
 def _print_log_hint() -> None:
-    _log(f"لاگ: {paths.log_file()}   |   وضعیت: {paths.status_file()}")
+    _log(f"log: {paths.log_file()}   |   status: {paths.status_file()}")
 
 
 def handle_service_command(action: str, wait: int = 15) -> int:
     """نقطه‌ی ورود دستور ``ramopt service <action>``."""
     if sys.platform != "win32":
-        _log("دستورهای سرویس فقط روی ویندوز کار می‌کنند.")
+        _log("service commands only work on Windows.")
         return EXIT_ERROR
 
     if action == "install":
@@ -427,7 +431,7 @@ def handle_service_command(action: str, wait: int = 15) -> int:
         return control(action, wait_seconds=wait)
     if action == "repair":
         return repair()
-    _log(f"دستور ناشناخته: {action}")
+    _log(f"unknown action: {action}")
     return EXIT_ERROR
 
 
@@ -447,7 +451,7 @@ def repair() -> int:
     try:
         hscm, hs = _open_service()
     except pywintypes.error:
-        _log("سرویس نصب نیست؛ از install استفاده کنید.")
+        _log("the service is not installed; use install.")
         return EXIT_ERROR
     try:
         win32service.ChangeServiceConfig(
@@ -476,7 +480,7 @@ def repair() -> int:
                 "Actions": [(SC_ACTION_RESTART, 5_000), (SC_ACTION_RESTART, 30_000)],
             },
         )
-        _log(f"سرویس اصلاح شد: {image_path}")
+        _log(f"service repaired: {image_path}")
         _register_event_source()
         return EXIT_OK
     finally:

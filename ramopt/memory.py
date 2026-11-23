@@ -226,7 +226,7 @@ def trim_working_sets(
     """
     report = TrimReport()
     if not api.available:
-        report.error = "ویندوز در دسترس نیست"
+        report.error = "Windows API is not available"
         return report
 
     me = os.getpid() if own_pid is None else own_pid
@@ -235,7 +235,7 @@ def trim_working_sets(
     try:
         processes = provider.list_processes()
     except Exception as exc:  # pragma: no cover - دفاعی
-        report.error = f"خواندن فهرست پروسه‌ها ناموفق: {exc}"
+        report.error = f"could not read the process list: {exc}"
         logger.exception(report.error)
         return report
 
@@ -287,7 +287,7 @@ def trim_working_sets(
                 report.failed += 1
         except OSError as exc:  # دسترسی یا پروسه‌ی از بین رفته
             report.failed += 1
-            logger.debug("trim پروسه‌ی %s ناموفق: %s", proc.name or proc.pid, exc)
+            logger.debug("could not trim %s: %s", proc.name or proc.pid, exc)
         finally:
             api.close_handle(handle)
 
@@ -312,7 +312,7 @@ def purge_standby_list(
     """
     report = PurgeReport()
     if not config.purge_standby_list:
-        report.skipped_reason = "در پیکربندی خاموش است"
+        report.skipped_reason = "disabled in the configuration"
         return report
 
     if (
@@ -321,8 +321,8 @@ def purge_standby_list(
         and current_available_mb >= config.min_free_mb_after_trim
     ):
         report.skipped_reason = (
-            f"بعد از trim حدود {current_available_mb:.0f} مگابایت آزاد است "
-            f"(حد لازم: {config.min_free_mb_after_trim})"
+            f"already free after trimming, {current_available_mb:.0f} MB "
+            f"(min_free_mb_after_trim: {config.min_free_mb_after_trim})"
         )
         return report
 

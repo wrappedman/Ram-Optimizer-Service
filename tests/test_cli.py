@@ -31,7 +31,7 @@ def test_config_validate_reports_errors(tmp_path, capsys):
     target = tmp_path / "bad.ini"
     target.write_text("[policy]\ntrigger_percent = 500\n", encoding="utf-8")
     assert main(["--config", str(target), "config", "--validate"]) == 1
-    assert "مشکل" in capsys.readouterr().out
+    assert "problem" in capsys.readouterr().out
 
 
 def test_config_validate_ok(tmp_path, capsys):
@@ -39,7 +39,7 @@ def test_config_validate_ok(tmp_path, capsys):
     assert main(["--config", str(target), "config", "--init"]) == 0
     assert main(["--config", str(target), "config", "--validate"]) == 0
     out = capsys.readouterr().out
-    assert "معتبر" in out
+    assert "is valid" in out
     assert str(target) in out  # مسیر نمایش‌داده‌شده باید همان فایل داده‌شده باشد
 
 
@@ -52,7 +52,7 @@ def test_config_show_prints_all_sections(capsys):
 
 def test_status_without_file(capsys):
     assert main(["status"]) == 1
-    assert "پیدا نشد" in capsys.readouterr().out
+    assert "not found" in capsys.readouterr().out
 
 
 def test_status_reads_json(isolated_data_dir, capsys):
@@ -75,7 +75,7 @@ def test_status_reads_json(isolated_data_dir, capsys):
 
     assert main(["status"]) == 0
     out = capsys.readouterr().out
-    assert "optimized" in out and "2 پاک‌سازی" in out
+    assert "optimized" in out and "2 passes" in out
 
     capsys.readouterr()
     assert main(["status", "--json"]) == 0
@@ -99,7 +99,7 @@ def test_windows_only_commands_fail_cleanly_on_posix(capsys):
         ["service", "query"],
     ):
         assert main(argv) == 3, argv
-    assert "فقط روی ویندوز" in capsys.readouterr().out
+    assert "only works on Windows" in capsys.readouterr().out
 
 
 def test_unknown_command_exits_with_argparse_error():

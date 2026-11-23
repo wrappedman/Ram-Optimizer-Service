@@ -152,16 +152,16 @@ class OptimizerEngine:
         self.last_result: CycleResult | None = None
 
     # -- کنترل خارجی (پاز/ریزیوم از سرویس یا CLI) -------------------------
-    def pause(self, reason: str = "درخواست کاربر") -> None:
+    def pause(self, reason: str = "requested by the user") -> None:
         if not self.paused:
-            logger.info("پاک‌سازی موقتاً متوقف شد (%s).", reason)
+            logger.info("Trimming paused (%s).", reason)
         self.paused = True
         self.pause_reason = reason
         self.mode = Mode.IDLE
 
     def resume(self) -> None:
         if self.paused:
-            logger.info("پاک‌سازی دوباره فعال شد.")
+            logger.info("Trimming resumed.")
         self.paused = False
         self.pause_reason = ""
         # بعد از ریزیوم، cooldown را ریست می‌کنیم تا کاربر منتظر نماند.
@@ -229,7 +229,7 @@ class OptimizerEngine:
         details: dict[str, object] = {}
 
         if self.paused:
-            return self.pause_reason or "موقتاً متوقف شده", details
+            return self.pause_reason or "paused", details
 
         boot_delay = self.config.startup_delay_seconds
         if boot_delay > 0:
@@ -237,7 +237,7 @@ class OptimizerEngine:
             if elapsed < boot_delay:
                 details["startup_delay_remaining_s"] = round(boot_delay - elapsed)
                 return (
-                    f"تأخیر شروع ({boot_delay} ثانیه) — {boot_delay - elapsed:.0f} ثانیه مانده",
+                    f"startup delay ({boot_delay} s) - {boot_delay - elapsed:.0f} s remaining",
                     details,
                 )
 
@@ -245,14 +245,14 @@ class OptimizerEngine:
             state = self.api.user_notification_state()
             details["user_state"] = state
             if state is not None and state in win32.BUSY_USER_STATES:
-                return "کاربر در حال استفاده‌ی تمام‌صفحه/ارائه است", details
+                return "user is fullscreen / presenting", details
 
         if self.config.skip_on_battery and self.api.is_on_battery():
             details["on_battery"] = True
-            return "روی باتری — پاک‌سازی انجام نمی‌شود", details
+            return "on battery - not trimming", details
 
         if self._in_quiet_hours():
-            return f"ساعت سکوت ({self.config.quiet_hours})", details
+            return f"quiet hours ({self.config.quiet_hours})", details
 
         return "", details
 
@@ -267,7 +267,7 @@ class OptimizerEngine:
             if self.paused:
                 return Decision(
                     Action.SKIPPED,
-                    self.pause_reason or "موقتاً متوقف شده",
+                    self.pause_reason or "paused",
                     self.mode,
                     critical=True,
                 )
@@ -276,15 +276,15 @@ class OptimizerEngine:
             if self.mode is Mode.IDLE:
                 self.mode = Mode.ARMED
                 logger.warning(
-                    "وضعیت بحرانی: مصرف %.1f%% ≥ %d%% (آستانه‌ی عادی %d%%) — اجرای فوری.",
+                    "CRITICAL: %.1f%% used >= %d%% (normal trigger %d%%) - acting immediately.",
                     used,
                     config.sustained_trigger_percent,
                     config.trigger_percent,
                 )
             return Decision(
                 Action.OPTIMIZED,
-                f"وضعیت بحرانی (مصرف {used:.1f}% ≥ {config.sustained_trigger_percent}%) "
-                f"— اجرای فوری بدون انتظار",
+                f"critical: {used:.1f}% used >= {config.sustained_trigger_percent}% "
+                f"- acting immediately, without waiting",
                 self.mode,
                 should_optimize=True,
                 critical=True,
@@ -295,7 +295,7 @@ class OptimizerEngine:
             if used >= config.trigger_percent:
                 self.mode = Mode.ARMED
                 logger.info(
-                    "مصرف رم %.1f%% ≥ آستانه %d%% — حالت فعال شد.",
+                    "RAM %.1f%% used >= trigger %d%% - armed.",
                     used,
                     config.trigger_percent,
                 )
@@ -303,16 +303,16 @@ class OptimizerEngine:
             self.mode = Mode.IDLE
             self.consecutive_useless = 0
             logger.info(
-                "مصرف رم %.1f%% ≤ %.1f%% — حالت آماده‌باش خاموش شد.",
+                "RAM %.1f%% used <= reset %.1f%% - back to idle.",
                 used,
                 config.reset_percent,
             )
-            return Decision(Action.NOOP, "مصرف زیر آستانه‌ی بازنشانی است", self.mode)
+            return Decision(Action.NOOP, "usage below the reset threshold", self.mode)
 
         if self.mode is Mode.IDLE:
             return Decision(
                 Action.NOOP,
-                f"مصرف {used:.1f}% زیر آستانه‌ی {config.trigger_percent}% است",
+                f"usage {used:.1f}% is below the trigger threshold {config.trigger_percent}%",
                 self.mode,
             )
 
@@ -326,8 +326,8 @@ class OptimizerEngine:
         if config.min_available_mb > 0 and reading.available_mb >= config.min_available_mb:
             return Decision(
                 Action.NOOP,
-                f"{reading.available_mb:.0f} مگابایت آزاد است "
-                f"(حداقل لازم برای اقدام: {config.min_available_mb})",
+                f"{reading.available_mb:.0f} MB already free "
+                f"(min_available_mb to act: {config.min_available_mb})",
                 self.mode,
             )
 
@@ -336,7 +336,7 @@ class OptimizerEngine:
         if remaining > 0:
             return Decision(
                 Action.SKIPPED,
-                f"در دوره‌ی خنک‌شدن — {remaining:.0f} ثانیه مانده",
+                f"cooling down - {remaining:.0f} s remaining",
                 self.mode,
                 details={"cooldown_remaining_s": round(remaining)},
             )
@@ -348,14 +348,17 @@ class OptimizerEngine:
             wait_s = max(0.0, 3600 - (self._now() - oldest).total_seconds())
             return Decision(
                 Action.SKIPPED,
-                f"سقف {config.max_purges_per_hour} پاک‌سازی در ساعت پر شده — "
-                f"{wait_s / 60:.0f} دقیقه دیگر",
+                f"hourly cap of {config.max_purges_per_hour} passes reached - "
+                f"next slot in {wait_s / 60:.0f} min",
                 self.mode,
                 details={"purges_last_hour": recent},
             )
 
         return Decision(
-            Action.OPTIMIZED, "آستانه رد شده و محدودیتی نیست", self.mode, should_optimize=True
+            Action.OPTIMIZED,
+            "threshold crossed and nothing blocks a pass",
+            self.mode,
+            should_optimize=True,
         )
 
     # -- اجرا --------------------------------------------------------------
@@ -368,9 +371,9 @@ class OptimizerEngine:
         reading = memory_mod.measure(self.api, self.provider)
         if reading.snapshot is None:
             if not self.api.available:
-                reason = self.api.load_error or "خواندن وضعیت حافظه ممکن نیست"
+                reason = self.api.load_error or "cannot read the memory state"
             else:
-                reason = "GlobalMemoryStatusEx ناموفق بود"
+                reason = "GlobalMemoryStatusEx failed"
             logger.error(reason)
             result = CycleResult(
                 timestamp=now.isoformat(timespec="seconds"),
@@ -407,7 +410,7 @@ class OptimizerEngine:
 
         # ---- اجرا ----
         if force:
-            result.reason = "اجرای دستی (force)"
+            result.reason = "manual run (force)"
 
         trim = memory_mod.trim_working_sets(self.api, self.provider, self.config)
         result.trim = trim
@@ -421,7 +424,7 @@ class OptimizerEngine:
 
         flushed, flush_error = memory_mod.flush_modified_list(self.api, self.config)
         if self.config.flush_modified_list and not flushed:
-            logger.warning("Flush Modified List ناموفق: %s", flush_error or "نامشخص")
+            logger.warning("Flush modified list failed: %s", flush_error or "unknown")
 
         final = self.api.memory_snapshot()
         if final is not None:
@@ -440,7 +443,7 @@ class OptimizerEngine:
             # شکست را در تاریخچه ثبت نمی‌کنیم تا cooldown بیهوده فعال نشود،
             # ولی بک‌آف ساعتی را زیاد می‌کنیم تا فشار بی‌فایده تکرار نشود.
             self.consecutive_useless += 1
-            logger.warning("پاک‌سازی هیچ سودی نداشت | %s | %s", result.reason, _describe(reading))
+            logger.warning("pass released nothing | %s | %s", result.reason, _describe(reading))
             self.last_result = result
             return result
 
@@ -457,15 +460,15 @@ class OptimizerEngine:
 
         avg_freed = (trim.freed_bytes / trim.trimmed / MB) if trim.trimmed else 0.0
         logger.info(
-            "پاک‌سازی انجام شد | پروسه: %d از %d (میانگین %.0fMB، دسترسی رد شد: %d) "
-            "| Working Set آزادشده: %.0fMB | Standby List: %s | "
-            "RAM آزاد: %.0f → %.0fMB | مصرف: %.1f%% → %.1f%% | %.0f میلی‌ثانیه",
+            "pass complete | processes %d of %d (avg %.0f MB, access denied: %d) "
+            "| working set released: %.0f MB | standby list: %s | "
+            "free RAM %.0f -> %.0f MB | usage %.1f%% -> %.1f%% | %.0f ms",
             trim.trimmed,
             trim.considered,
             avg_freed,
             trim.denied,
             trim.freed_mb,
-            "خالی شد" if purge.purged else (purge.error or purge.skipped_reason or "خاموش"),
+            "purged" if purge.purged else (purge.error or purge.skipped_reason or "off"),
             reading.available_mb,
             result.available_mb_after
             if result.available_mb_after is not None
@@ -481,30 +484,30 @@ class OptimizerEngine:
 
 
 def _failure_reason(trim: memory_mod.TrimReport, purge: memory_mod.PurgeReport) -> str:
-    """توضیح دقیق اینکه چرا هیچ کاری انجام نشد (به‌جای «موفق» دروغین)."""
+    """Exactly why nothing was released (instead of a fake success)."""
     parts: list[str] = []
     if trim.error:
         parts.append(trim.error)
     if trim.considered == 0:
-        parts.append("هیچ پروسه‌ی واجد شرایطی پیدا نشد")
+        parts.append("no eligible process found")
     elif trim.trimmed == 0:
         if trim.denied:
-            parts.append(f"دسترسی به {trim.denied} پروسه رد شد (ادمین نیستید؟)")
+            parts.append(f"access denied for {trim.denied} process(es) - not elevated?")
         if trim.failed:
-            parts.append(f"{trim.failed} پروسه هنگام trim خطا داد")
+            parts.append(f"{trim.failed} process(es) failed to trim")
     if purge.error:
-        parts.append(f"خالی کردن Standby List ناموفق: {purge.error}")
+        parts.append(f"standby list purge failed: {purge.error}")
     elif purge.skipped_reason:
-        parts.append(f"Standby List دست نخورد: {purge.skipped_reason}")
-    return " | ".join(parts) or "هیچ تغییری لازم نبود"
+        parts.append(f"standby list left alone: {purge.skipped_reason}")
+    return " | ".join(parts) or "nothing needed changing"
 
 
 def _describe(reading: memory_mod.Reading) -> str:
-    standby = f"{reading.standby_mb:.0f}MB" if reading.standby_mb is not None else "?"
+    standby = f"{reading.standby_mb:.0f} MB" if reading.standby_mb is not None else "?"
     return (
-        f"RAM {reading.used_percent:.1f}% | آزاد {reading.available_mb:.0f}MB | "
+        f"used {reading.used_percent:.1f}% | free {reading.available_mb:.0f} MB | "
         f"commit {reading.commit_percent:.0f}% | standby {standby} | "
-        f"پروسه‌ها {reading.process_count}"
+        f"processes {reading.process_count}"
     )
 
 

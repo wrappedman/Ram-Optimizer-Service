@@ -82,7 +82,7 @@ def test_cooldown_blocks_second_run(base_config, fake_api, fake_provider, clock)
 
     decision = engine.decide(reading(85.0))
     assert decision.action is Action.SKIPPED
-    assert "خنک‌شدن" in decision.reason
+    assert "cooling down" in decision.reason
 
     clock.advance(base_config.cooldown_seconds + 1)
     engine.mode = Mode.ACTIVE
@@ -113,7 +113,7 @@ def test_hourly_cap(base_config, fake_api, fake_provider, clock):
 
     decision = engine.decide(reading(90.0))
     assert decision.action is Action.SKIPPED
-    assert "سقف" in decision.reason
+    assert "hourly cap" in decision.reason
 
     clock.advance(3601)  # پنجره‌ی یک‌ساعته می‌گذرد
     decision = engine.decide(reading(90.0))
@@ -130,7 +130,7 @@ def test_skips_in_fullscreen(base_config, fake_api, fake_provider, clock):
     engine = make_engine(base_config, fake_api, fake_provider, clock)
     decision = engine.decide(reading(90.0))
     assert decision.action is Action.SKIPPED
-    assert "تمام‌صفحه" in decision.reason
+    assert "fullscreen" in decision.reason
 
 
 def test_fullscreen_check_can_be_disabled(base_config, fake_api, fake_provider, clock):
@@ -149,7 +149,7 @@ def test_skips_on_battery_only_when_configured(base_config, fake_api, fake_provi
     engine = make_engine(config, fake_api, fake_provider, clock)
     decision = engine.decide(reading(90.0))
     assert decision.action is Action.SKIPPED
-    assert "باتری" in decision.reason
+    assert "battery" in decision.reason
 
 
 def test_startup_delay(base_config, fake_api, fake_provider, clock):
@@ -157,7 +157,7 @@ def test_startup_delay(base_config, fake_api, fake_provider, clock):
     engine = make_engine(config, fake_api, fake_provider, clock)
     decision = engine.decide(reading(90.0))
     assert decision.action is Action.SKIPPED
-    assert "تأخیر شروع" in decision.reason
+    assert "startup delay" in decision.reason
 
     clock.advance(121)
     assert engine.decide(reading(90.0)).should_optimize is True
@@ -193,7 +193,7 @@ def test_min_available_mb_goal(base_config, fake_api, fake_provider, clock):
     engine = make_engine(config, fake_api, fake_provider, clock)
     decision = engine.decide(reading(80.0, available_gb=8.0))
     assert decision.action is Action.NOOP
-    assert "آزاد است" in decision.reason
+    assert "already free" in decision.reason
 
     decision = engine.decide(reading(80.0, available_gb=2.0))
     assert decision.should_optimize is True

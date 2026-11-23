@@ -209,20 +209,20 @@ def _get_int(
         value = int(float(normalize_number_text(raw)))
     except (TypeError, ValueError):
         issues.append(
-            ValidationIssue(section, key, raw, "عدد صحیح نامعتبر — مقدار پیش‌فرض استفاده شد")
+            ValidationIssue(section, key, raw, "not a valid integer - the default was used")
         )
         return default
     if value < minimum:
         issues.append(
             ValidationIssue(
-                section, key, raw, f"کمتر از حد مجاز ({minimum}) — مقدار پیش‌فرض استفاده شد"
+                section, key, raw, f"below the allowed minimum ({minimum}) - the default was used"
             )
         )
         return default
     if maximum is not None and value > maximum:
         issues.append(
             ValidationIssue(
-                section, key, raw, f"بیشتر از حد مجاز ({maximum}) — مقدار پیش‌فرض استفاده شد"
+                section, key, raw, f"above the allowed maximum ({maximum}) - the default was used"
             )
         )
         return default
@@ -244,9 +244,7 @@ def _get_bool(
         return True
     if stripped in {"0", "false", "no", "off", "disabled", "خیر"}:
         return False
-    issues.append(
-        ValidationIssue(section, key, raw, "مقدار بولی نامعتبر — مقدار پیش‌فرض استفاده شد")
-    )
+    issues.append(ValidationIssue(section, key, raw, "not a valid boolean - the default was used"))
     return default
 
 
@@ -415,7 +413,7 @@ def config_from_parser(
         if raw.strip() and not normalized:
             issues.append(
                 ValidationIssue(
-                    "safety", "quiet_hours", raw, "قالب نامعتبر (نمونه‌ی درست: 23:00-06:00)"
+                    "safety", "quiet_hours", raw, "invalid format (valid example: 23:00-06:00)"
                 )
             )
         config.quiet_hours = normalized
@@ -427,7 +425,9 @@ def config_from_parser(
             config.log_level = raw
         elif raw:
             issues.append(
-                ValidationIssue("logging", "level", raw, "سطح لاگ نامعتبر — مقدار info استفاده شد")
+                ValidationIssue(
+                    "logging", "level", raw, "invalid log level - info was used instead"
+                )
             )
 
     # سازگاری سیاست
@@ -437,7 +437,7 @@ def config_from_parser(
                 "policy",
                 "reset_percent",
                 str(config.reset_percent),
-                "باید کمتر از trigger_percent باشد — مقدار trigger_percent-10 استفاده شد",
+                "must be lower than trigger_percent - trigger_percent-10 was used instead",
             )
         )
         config.reset_percent = max(0, config.trigger_percent - 10)
@@ -462,7 +462,7 @@ def load_config(path: str | None = None) -> tuple[Config, list[ValidationIssue]]
         with open(config_path, encoding="utf-8-sig") as handle:
             parser.read_file(handle)
     except (OSError, configparser.Error) as exc:
-        issues.append(ValidationIssue("file", config_path, "", f"خواندن فایل ناموفق بود: {exc}"))
+        issues.append(ValidationIssue("file", config_path, "", f"could not read the file: {exc}"))
         return Config(), issues
 
     return config_from_parser(parser, issues), issues
@@ -472,60 +472,60 @@ def default_config_text(config: Config | None = None) -> str:
     """متن ``config.ini`` نمونه (همان چیزی که با ``ramopt config --init`` ساخته می‌شود)."""
     cfg = config or Config()
     lines = [
-        "; Ram Optimizer Service — فایل پیکربندی",
-        "; هر تغییری بعد از ری‌استارت سرویس اعمال می‌شود:  sc stop RamOptimizerService && sc start RamOptimizerService",
-        "; مقادیر با «;» کامنت می‌شوند. حذف یک کلید یعنی استفاده از مقدار پیش‌فرض.",
+        "; RAM Optimizer Service - configuration file",
+        "; changes take effect after a restart:  sc stop RamOptimizerService && sc start RamOptimizerService",
+        "; lines starting with ';' are comments. Remove a key to fall back to its default.",
         "",
         "[general]",
-        "; هر چند ثانیه بررسی شود (۱۰ تا ۳۶۰۰)",
+        "; how often to check memory, in seconds (10 to 3600)",
         f"check_interval_seconds = {cfg.check_interval_seconds}",
-        "; تأخیر بعد از بوت تا سرویس‌های دیگر بالا بیایند",
+        "; delay after boot so other services can start first",
         f"startup_delay_seconds = {cfg.startup_delay_seconds}",
-        "; در وضعیت بحرانی (بالای آستانه‌ی بحرانی) هر چند ثانیه چک شود",
+        "; while critical (above the critical threshold) check this often, in seconds",
         f"critical_poll_seconds = {cfg.critical_poll_seconds}",
-        "; بین دو چرخه هر چند ثانیه یک خواندن سبک؛ اگر رم بحرانی شد همان لحظه بیدار شو (۰ = خاموش)",
+        "; light probe between cycles; wake up at once if memory goes critical (0 = off)",
         f"critical_probe_seconds = {cfg.critical_probe_seconds}",
         "",
         "[policy]",
-        "; آستانه‌ی شروع پاک‌سازی (درصد)",
+        "; start releasing memory at this usage percentage",
         f"trigger_percent = {cfg.trigger_percent}",
-        "; پاک‌سازی تا وقتی مصرف به این درصد نرسد تکرار نمی‌شود (هیسترزیس)",
+        "; do not release again until usage has dropped to this percentage (hysteresis)",
         f"reset_percent = {cfg.reset_percent}",
-        "; حداقل فاصله بین دو پاک‌سازی (ثانیه)",
+        "; minimum seconds between two release passes",
         f"cooldown_seconds = {cfg.cooldown_seconds}",
-        "; سقف پاک‌سازی در هر ساعت (۰ = بی‌نهایت)",
+        "; maximum release passes per hour (0 = unlimited)",
         f"max_purges_per_hour = {cfg.max_purges_per_hour}",
-        "; اگر این مقدار حافظه آزاد باشد هرگز پاک‌سازی نمی‌شود (۰ = غیرفعال)",
+        "; never act while this much memory is already free (0 = disabled)",
         f"min_available_mb = {cfg.min_available_mb}",
-        "; نقطه‌ی بحرانی: بالاتر از این درصد، بدون انتظار برای فاصله‌ی عادی اجرا می‌شود (۰ = غیرفعال)",
+        "; critical point: above this percentage act immediately (0 = disabled)",
         f"sustained_trigger_percent = {cfg.sustained_trigger_percent}",
-        "; چند بررسی متوالی بالای آستانه‌ی بحرانی لازم است",
+        "; how many consecutive readings above the critical point are required",
         f"sustained_polls = {cfg.sustained_polls}",
         "",
         "[standby]",
-        "; خالی کردن Standby List (کش حافظه)",
+        "; purge the standby list (Windows file cache)",
         f"purge = {'true' if cfg.purge_standby_list else 'false'}",
-        "; خالی کردن کش فقط اگر بعد از trim هنوز کمتر از این مقدار آزاد است",
+        "; purge it only if less than this much is free after trimming (MB)",
         f"min_free_mb_after_trim = {cfg.min_free_mb_after_trim}",
-        "; نوشتن صفحات تغییرکرده روی دیسک (به‌طور پیش‌فرض خاموش)",
+        "; write modified pages to disk (off by default: it is slow)",
         f"flush_modified_list = {'true' if cfg.flush_modified_list else 'false'}",
         "",
         "[targets]",
-        "; پروسه‌های کوچک‌تر از این مقدار (مگابایت) دست نمی‌خورند",
+        "; processes below this working set (MB) are left alone",
         f"min_process_ws_mb = {cfg.min_process_ws_mb}",
-        "; حداکثر تعداد پروسه در هر دور (۰ = بی‌نهایت)",
+        "; maximum processes per pass (0 = unlimited)",
         f"max_processes = {cfg.max_processes}",
-        "; پروسه‌های مستثنا (نام دقیق، جدا با کاما)",
+        "; excluded process names (exact match, comma separated)",
         f"exclude = {', '.join(cfg.exclude)}",
-        "; الگوهای wildcard برای استثنا",
+        "; wildcard patterns to exclude",
         f"exclude_patterns = {', '.join(cfg.exclude_patterns)}",
         "",
         "[safety]",
-        "; وقتی کاربر بازی/برنامه‌ی تمام‌صفحه اجرا می‌کند پاک‌سازی نکن",
+        "; do not trim while a fullscreen app or presentation is active",
         f"skip_when_fullscreen = {'true' if cfg.skip_when_fullscreen else 'false'}",
-        "; روی باتری پاک‌سازی نکن",
+        "; do not trim on battery power",
         f"skip_on_battery = {'true' if cfg.skip_on_battery else 'false'}",
-        "; بازه‌ی سکوت (خالی = غیرفعال)",
+        "; quiet hours, e.g. 23:00-06:00 (empty = off)",
         f"quiet_hours = {cfg.quiet_hours}",
         "",
         "[logging]",

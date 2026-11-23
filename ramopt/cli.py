@@ -100,7 +100,7 @@ def _json_print(data) -> None:
 
 def _require_windows() -> bool:
     if sys.platform != "win32":
-        _print("خطا: این دستور فقط روی ویندوز کار می‌کند.")
+        _print("error: this command only works on Windows.")
         return False
     return True
 
@@ -113,7 +113,7 @@ def _load(args):
 def _report_issues(issues, verbose: bool = True) -> None:
     for issue in issues:
         if verbose:
-            _print(f"⚠ [{issue.section}] {issue.key} = {issue.value!r}: {issue.message}")
+            _print(f"warning: [{issue.section}] {issue.key} = {issue.value!r}: {issue.message}")
 
 
 def _apply_log_level(config) -> None:
@@ -137,13 +137,26 @@ def cmd_version(_args) -> int:
     return EXIT_OK
 
 
+def _num(value, suffix: str = "") -> str:
+    """Format an optional number for humans ("?" instead of "None")."""
+    if value is None:
+        return "?"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    text = f"{number:.1f}".rstrip("0").rstrip(".") if number % 1 else f"{number:.0f}"
+    return f"{text}{suffix}"
+
+
 def cmd_status(args) -> int:
+    """Current state, from status.json (--json for machine use)."""
     from ramopt.status import read_status
 
     data = read_status()
     if data is None:
-        _print("status.json پیدا نشد — سرویس هرگز اجرا نشده یا پوشه‌ی داده‌ها متفاوت است.")
-        _print(f"مسیر موردانتظار: {paths.status_file()}")
+        _print("status.json not found - the service has never run, or uses another data folder.")
+        _print(f"expected path: {paths.status_file()}")
         return EXIT_ERROR
     if args.json:
         _json_print(data)
@@ -151,49 +164,61 @@ def cmd_status(args) -> int:
 
     memory: dict = data.get("memory") or {}
     counters: dict = data.get("counters") or {}
-    _print(f"نسخه           : {data.get('version')}")
-    _print(f"وضعیت          : {data.get('state')}   (PID {data.get('pid')})")
-    _print(f"شروع           : {data.get('started_at')}")
-    _print(f"آخرین چرخه     : {data.get('last_cycle_at')}")
-    _print(f"آخرین اقدام    : {data.get('last_action')} — {data.get('last_reason')}")
-    _print(
-        "حافظه          : "
-        f"{memory.get('used_percent', '?')}% مصرف | "
-        f"{memory.get('available_mb', '?')}MB آزاد | "
+    critical = (data.get("extra") or {}).get("critical")
+
+    def row(label: str, value: str) -> None:
+        _print(f"  {label:<14}{value}")
+
+    _print(f"RAM Optimizer Service {data.get('version')}")
+    row("state", f"{data.get('state')}  (pid {data.get('pid')})")
+    row("started", str(data.get("started_at")))
+    row("last cycle", str(data.get("last_cycle_at")))
+    row("last action", str(data.get("last_action")))
+    # reason/last_action may be Persian in older status files; keep them as-is.
+    if data.get("last_reason"):
+        _print(f"                 {data.get('last_reason')}")
+    row(
+        "memory",
+        f"{memory.get('used_percent', '?')}% used | "
+        f"{memory.get('available_mb', '?')} MB free | "
         f"commit {memory.get('commit_percent', '?')}% | "
-        f"standby {memory.get('standby_mb', '?')}MB"
+        f"standby {memory.get('standby_mb', '?')} MB",
     )
-    _print(
-        f"شمارنده‌ها      : {counters.get('purges', 0)} پاک‌سازی | "
-        f"{counters.get('freed_mb', 0)}MB آزادشده | "
-        f"{counters.get('errors', 0)} خطا | {counters.get('cycles', 0)} چرخه"
+    row(
+        "counters",
+        f"{counters.get('purges', 0)} passes | "
+        f"{counters.get('freed_mb', 0)} MB freed | "
+        f"{counters.get('errors', 0)} errors | "
+        f"{counters.get('cycles', 0)} cycles",
     )
     if data.get("next_allowed_at"):
-        _print(f"پاک‌سازی بعدی  : از {data.get('next_allowed_at')} به بعد")
+        row("next pass", f"allowed from {data.get('next_allowed_at')}")
+    if critical is not None:
+        row("critical", "yes - acts immediately" if critical else "no")
     for err in data.get("recent_errors") or []:
-        _print(f"  آخرین خطا: {err.get('at')} — {err.get('message')}")
+        _print(f"  error: {err.get('at')} - {err.get('message')}")
     return EXIT_OK
 
 
 def cmd_config(args) -> int:
     if args.init:
         path = write_default_config(args.config or None, overwrite=args.force)
-        action = "به‌روزرسانی شد" if args.force else "آماده است"
-        _print(f"فایل پیکربندی {action}: {path}")
+        action = "rewritten" if args.force else "ready"
+        _print(f"config file {action}: {path}")
         return EXIT_OK
 
     config, issues = _load(args)
     effective_path = args.config or paths.config_file()
     if args.validate:
         if issues:
-            _print(f"{len(issues)} مشکل در فایل پیکربندی:")
+            _print(f"{len(issues)} problem(s) in the config file:")
             _report_issues(issues)
             return EXIT_ERROR
         if not os.path.isfile(effective_path):
-            _print(f"فایل پیکربندی وجود ندارد: {effective_path} (مقادیر پیش‌فرض استفاده می‌شوند)")
+            _print(f"no config file at {effective_path} (built-in defaults are used)")
             return EXIT_OK
-        _print("فایل پیکربندی معتبر است. ✔")
-        _print(f"مسیر: {effective_path}")
+        _print("config file is valid.")
+        _print(f"path: {effective_path}")
         return EXIT_OK
 
     _report_issues(issues)
@@ -205,7 +230,7 @@ def cmd_config(args) -> int:
                 value = ", ".join(value)
             _print(f"  {key} = {value}")
         _print()
-    _print(f"مسیر فایل پیکربندی: {effective_path}")
+    _print(f"config file: {effective_path}")
     return EXIT_OK
 
 
@@ -236,7 +261,7 @@ def cmd_test(args) -> int:
 
     api = win32.Win32Api()
     if not api.available:
-        _print(f"خطا: {api.load_error}")
+        _print(f"error: {api.load_error}")
         return EXIT_ERROR
 
     from ramopt.logging_setup import log_startup_banner
@@ -244,7 +269,9 @@ def cmd_test(args) -> int:
     log_startup_banner(config)
     for privilege in ("SeProfileSingleProcessPrivilege", "SeIncreaseQuotaPrivilege"):
         if not api.enable_privilege(privilege):
-            _print(f"⚠ اختیار {privilege} فعال نشد — CMD را با «Run as administrator» باز کنید.")
+            _print(
+                f"warning: could not enable {privilege} - start the command prompt as administrator."
+            )
 
     provider = memory_mod.PsutilProcessProvider()
     reading = memory_mod.measure(api, provider)
@@ -252,15 +279,15 @@ def cmd_test(args) -> int:
     if args.dry_run:
         engine = OptimizerEngine(config, api, provider)
         decision = engine.decide(reading)
-        _print("—— حالت dry-run: هیچ تغییری در سیستم داده نمی‌شود ——")
+        _print("--- dry run: nothing on this system will be changed ---")
         _print(
-            f"حافظه: {reading.used_percent:.1f}% مصرف | {reading.available_mb:.0f}MB آزاد | "
+            f"memory: {reading.used_percent:.1f}% used | {reading.available_mb:.0f} MB free | "
             f"commit {reading.commit_percent:.0f}% | standby "
-            f"{'?' if reading.standby_mb is None else f'{reading.standby_mb:.0f}MB'} | "
-            f"{reading.process_count} پروسه"
+            f"{'?' if reading.standby_mb is None else f'{reading.standby_mb:.0f} MB'} | "
+            f"{reading.process_count} processes"
         )
-        _print(f"تصمیم: {decision.action.value} | حالت: {decision.mode.value}")
-        _print(f"دلیل : {decision.reason}")
+        _print(f"decision: {decision.action.value} | mode: {decision.mode.value}")
+        _print(f"reason:   {decision.reason}")
         candidates = [
             p
             for p in provider.list_processes()
@@ -271,13 +298,13 @@ def cmd_test(args) -> int:
         candidates.sort(key=lambda p: p.working_set_bytes, reverse=True)
         if config.max_processes:
             candidates = candidates[: config.max_processes]
-        _print(f"\nپروسه‌هایی که پاک می‌شدند ({len(candidates)}):")
+        _print(f"\nprocesses that would be trimmed ({len(candidates)}):")
         for proc in candidates[:20]:
             _print(
                 f"  {proc.working_set_bytes / memory_mod.MB:9.1f}MB  {proc.name}  (PID {proc.pid})"
             )
         if len(candidates) > 20:
-            _print(f"  … و {len(candidates) - 20} پروسه‌ی دیگر")
+            _print(f"  ... and {len(candidates) - 20} more processes")
         return EXIT_OK
 
     engine = OptimizerEngine(config, api, provider)
@@ -286,32 +313,36 @@ def cmd_test(args) -> int:
     if args.json:
         _json_print(payload)
     else:
-        _print(f"اقدام : {payload['action']} — {payload['reason']}")
-        _print(
-            f"حافظه : {payload.get('used_percent_before')}% → {payload.get('used_percent_after')}% | "
-            f"آزاد {payload.get('available_mb_before')}MB → {payload.get('available_mb_after')}MB"
-        )
+        _print(f"action:  {payload['action']} - {payload['reason']}")
+        before_pct = payload.get("used_percent_before")
+        after_pct = payload.get("used_percent_after")
+        before_mb = payload.get("available_mb_before")
+        after_mb = payload.get("available_mb_after")
+        pct = f"{_num(before_pct)}% -> {_num(after_pct)}%"
+        free = f"{_num(before_mb)} MB -> {_num(after_mb)} MB"
+        _print(f"memory:  {pct} | free {free}")
         if payload.get("trim"):
             trim: dict = payload["trim"]
             _print(
-                f"trim  : {trim['trimmed']}/{trim['considered']} پروسه | "
-                f"{trim['freed_mb']}MB Working Set | دسترسی رد شد: {trim['denied']} | "
-                f"خطا: {trim['failed']}"
+                f"trim:    {trim['trimmed']}/{trim['considered']} processes | "
+                f"{trim['freed_mb']} MB working set | access denied: {trim['denied']} | "
+                f"failed: {trim['failed']}"
             )
             for item in trim.get("biggest", []):
                 _print(f"         {item['mb']:8.1f}MB  {item['name']}")
         if payload.get("purge"):
             purge: dict = payload["purge"]
             status_text = (
-                "خالی شد" if purge["purged"] else (purge["error"] or purge["skipped_reason"])
+                "purged" if purge["purged"] else (purge["error"] or purge["skipped_reason"])
             )
             _print(
                 f"standby: {status_text} | "
-                f"{purge['standby_before_mb']}MB → {purge['standby_after_mb']}MB"
+                f"{_num(purge['standby_before_mb'], ' MB')} -> "
+                f"{_num(purge['standby_after_mb'], ' MB')}"
             )
-        _print(f"زمان  : {payload['duration_ms']} میلی‌ثانیه")
+        _print(f"time:    {payload['duration_ms']} ms")
         if payload["action"] == "skipped":
-            _print("نتیجه : هیچ تغییری اعمال نشد (دلیل بالا).")
+            _print("result:  nothing was changed (see the reason above).")
     return EXIT_OK if payload["action"] != "skipped" or args.dry_run else EXIT_ERROR
 
 
@@ -330,7 +361,7 @@ def cmd_console(args) -> int:
         runner.run_forever()
     except KeyboardInterrupt:
         runner.stop()
-        _print("متوقف شد.")
+        _print("stopped.")
     return EXIT_OK
 
 
@@ -364,11 +395,11 @@ def _write_command(command: str) -> int:
             json.dump({"command": command, "created_at": _now_iso()}, handle)
         os.replace(temp, target)
     except OSError as exc:
-        _print(f"خطا: نوشتن {target} ناموفق بود: {exc}")
-        _print("برای این کار باید با دسترسی Administrator اجرا شود.")
+        _print(f"error: could not write {target}: {exc}")
+        _print("this needs to run with administrator rights.")
         return EXIT_ERROR
-    _print(f"دستور «{command}» ثبت شد. سرویس حداکثر در بررسی بعدی آن را اعمال می‌کند.")
-    _print(f"فایل: {target}")
+    _print(f'command "{command}" queued; the service applies it on its next check.')
+    _print(f"file: {target}")
     return EXIT_OK
 
 
@@ -558,7 +589,7 @@ class _PosixApi:
 def cmd_log(args) -> int:
     log_path = paths.log_file()
     if not os.path.isfile(log_path):
-        _print(f"فایل لاگ وجود ندارد: {log_path}")
+        _print(f"no log file yet: {log_path}")
         return EXIT_ERROR
     with open(log_path, encoding="utf-8", errors="replace") as handle:
         lines = handle.readlines()
@@ -618,45 +649,55 @@ def _grouped(data: dict) -> dict[str, dict]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ramopt",
-        description="RAM Optimizer Service — آزادسازی حافظه فقط وقتی واقعاً لازم است.",
+        description="RAM Optimizer Service - releases memory only when it is really needed.",
     )
     parser.add_argument(
         "--config",
         metavar="PATH",
-        help="مسیر فایل پیکربندی جایگزین (پیش‌فرض: <ProgramData>\\RamOptimizer\\config.ini)",
+        help="alternative config file (default: <ProgramData>\\RamOptimizer\\config.ini)",
     )
     parser.add_argument("--version", action="version", version=_version_text())
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("version", help="نمایش نسخه و اطلاعات محیط").set_defaults(
+    subparsers.add_parser("version", help="show the version and the environment").set_defaults(
         func=cmd_version
     )
 
-    status_parser = subparsers.add_parser("status", help="نمایش وضعیت فعلی")
-    status_parser.add_argument("--json", action="store_true", help="خروجی JSON")
+    status_parser = subparsers.add_parser("status", help="show the current state")
+    status_parser.add_argument("--json", action="store_true", help="machine-readable JSON output")
     status_parser.set_defaults(func=cmd_status)
 
-    config_parser = subparsers.add_parser("config", help="مدیریت فایل پیکربندی")
+    config_parser = subparsers.add_parser("config", help="manage the config file")
     group = config_parser.add_mutually_exclusive_group()
-    group.add_argument("--init", action="store_true", help="ساخت config.ini نمونه")
-    group.add_argument("--show", action="store_true", help="نمایش پیکربندی مؤثر (پیش‌فرض)")
-    group.add_argument("--validate", action="store_true", help="بررسی اعتبار فایل")
-    config_parser.add_argument("--force", action="store_true", help="بازنویسی فایل موجود")
+    group.add_argument("--init", action="store_true", help="write a default config.ini")
+    group.add_argument(
+        "--show", action="store_true", help="show the effective configuration (default)"
+    )
+    group.add_argument("--validate", action="store_true", help="validate the file")
+    config_parser.add_argument("--force", action="store_true", help="overwrite an existing file")
     config_parser.set_defaults(func=cmd_config)
 
-    test_parser = subparsers.add_parser("test", help="یک چرخه‌ی آزمایشی")
-    test_parser.add_argument("--dry-run", action="store_true", help="بدون تغییر سیستم")
-    test_parser.add_argument("--force", action="store_true", help="صرف‌نظر از آستانه و cooldown")
+    test_parser = subparsers.add_parser("test", help="run one trial cycle")
+    test_parser.add_argument("--dry-run", action="store_true", help="change nothing on the system")
     test_parser.add_argument(
-        "--include-fullscreen", action="store_true", help="حتی در حالت تمام‌صفحه هم اجرا کن"
+        "--force", action="store_true", help="ignore the threshold and the cooldown"
     )
-    test_parser.add_argument("--json", action="store_true", help="خروجی JSON")
+    test_parser.add_argument(
+        "--include-fullscreen",
+        action="store_true",
+        help="also run while a fullscreen app is active",
+    )
+    test_parser.add_argument("--json", action="store_true", help="machine-readable JSON output")
     test_parser.set_defaults(func=cmd_test)
 
-    subparsers.add_parser("console", help="اجرای دائمی در پیش‌زمینه").set_defaults(func=cmd_console)
-    subparsers.add_parser("once", help="یک چرخه (برای Task Scheduler)").set_defaults(func=cmd_once)
+    subparsers.add_parser("console", help="run continuously in the foreground").set_defaults(
+        func=cmd_console
+    )
+    subparsers.add_parser("once", help="run a single cycle (for Task Scheduler)").set_defaults(
+        func=cmd_once
+    )
 
-    service_parser = subparsers.add_parser("service", help="مدیریت سرویس ویندوز")
+    service_parser = subparsers.add_parser("service", help="manage the Windows service")
     service_parser.add_argument(
         "action",
         choices=[
@@ -672,30 +713,34 @@ def build_parser() -> argparse.ArgumentParser:
         ],
     )
     service_parser.add_argument(
-        "--wait", type=int, default=15, help="حداکثر ثانیه انتظار برای تغییر وضعیت"
+        "--wait", type=int, default=15, help="seconds to wait for a state change"
     )
     service_parser.set_defaults(func=cmd_service)
 
-    subparsers.add_parser("pause", help="توقف موقت پاک‌سازی در سرویس در حال اجرا").set_defaults(
+    subparsers.add_parser("pause", help="pause trimming in the running service").set_defaults(
         func=cmd_pause
     )
-    subparsers.add_parser("resume", help="ادامه‌ی پاک‌سازی پس از pause").set_defaults(func=cmd_resume)
+    subparsers.add_parser("resume", help="resume trimming after a pause").set_defaults(
+        func=cmd_resume
+    )
     subparsers.add_parser(
-        "reload", help="خواندن دوباره‌ی config.ini بدون ری‌استارت سرویس"
+        "reload", help="reload config.ini without restarting the service"
     ).set_defaults(func=cmd_reload)
 
     verify_parser = subparsers.add_parser(
-        "verify", help="بررسی عملی سناریوی «هر یک دقیقه / بحرانی = فوری»"
+        "verify", help="prove the scenario: every 60 s, and immediately when critical"
     )
     verify_parser.add_argument(
-        "--simulate-critical", action="store_true", help="شبیه‌سازی مسیر بحرانی (بدون تغییر سیستم)"
+        "--simulate-critical",
+        action="store_true",
+        help="simulate the critical path (changes nothing)",
     )
     verify_parser.add_argument(
-        "--watch", type=int, default=0, metavar="SECONDS", help="پایش زنده به مدت N ثانیه"
+        "--watch", type=int, default=0, metavar="SECONDS", help="watch live for N seconds"
     )
     verify_parser.set_defaults(func=cmd_verify)
 
-    log_parser = subparsers.add_parser("log", help="نمایش انتهای لاگ")
+    log_parser = subparsers.add_parser("log", help="show the end of the log file")
     log_parser.add_argument("--lines", type=int, default=40)
     log_parser.set_defaults(func=cmd_log)
 
@@ -720,7 +765,7 @@ def main(argv: list[str] | None = None) -> int:
         from ramopt.logging_setup import write_crash
 
         write_crash(type(exc), exc, exc.__traceback__, note="cli")
-        _print(f"خطای غیرمنتظره: {exc}")
+        _print(f"unexpected error: {exc}")
         return EXIT_ERROR
 
 

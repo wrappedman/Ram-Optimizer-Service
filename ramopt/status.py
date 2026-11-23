@@ -96,7 +96,7 @@ class StatusWriter:
                 raise
             return True
         except Exception as exc:  # pragma: no cover - خطای دیسک
-            logger.debug("نوشتن status.json ناموفق: %s", exc)
+            logger.debug("could not write status.json: %s", exc)
             return False
 
 

@@ -56,9 +56,41 @@ build\Manage-RamOptimizer.bat logs -Lines 200
 | `RamOptimizerService\` | PyInstaller output (the exe and its files) |
 | `build_info.json`, `SHA256SUMS.txt` | what was built, from which commit, with which hash |
 
+The panel is **plain ASCII and English only** on purpose: it has to run on
+stock Windows PowerShell 5.1 and inside any console code page. (An earlier
+version built Persian labels from `` `u{...}`` escapes — PowerShell 6+ syntax
+that 5.1 prints literally, without any error, so the menu showed
+`` `u{067E}`u{0646}… `` instead of text. Never again: a test now rejects
+non-ASCII output.)
+
+```
+============================================================
+  RAM Optimizer Service  -  Control Panel
+============================================================
+  exe             RamOptimizerService
+  path            C:\...\build\RamOptimizerService\RamOptimizerService.exe
+  service         RUNNING  (Automatic)
+  last cycle      78% used, normal
+
+  SERVICE
+    1  Install          2  Remove
+    3  Status           4  Logs
+
+  CONTROL
+    5  Start            6  Stop
+    7  Restart         10  Reload configuration
+   11  Pause / resume trimming
+
+  INSPECT
+    8  Dry run (no changes)   9  Configuration
+   12  Diagnostics           13  Behaviour check
+
+    0  Exit
+```
+
 Menu items: 1 install, 2 remove, 3 status, 4 logs, 5-7 start/stop/restart,
 8 dry run, 9 config file, 10 reload config, 11 pause/resume trimming,
-12 diagnostics, 13 verify the 1-minute/critical behaviour.
+12 diagnostics, 13 verify the 1-minute/critical behaviour, 0 exit.
 
 ### Or use the installer
 

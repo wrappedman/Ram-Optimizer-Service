@@ -69,23 +69,23 @@ if PYWIN32_AVAILABLE:  # pragma: no cover - فقط ویندوز
 
         def SvcStop(self):
             self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING, waitHint=10000)
-            logger.info("درخواست توقف سرویس دریافت شد.")
+            logger.info("stop request received from the service manager.")
             if self._runner is not None:
                 self._runner.stop()
 
         def SvcShutdown(self):
-            logger.info("درخواست خاموشی سیستم — توقف سرویس.")
+            logger.info("system is shutting down - stopping the service.")
             self.SvcStop()
 
         def SvcPause(self):
             self.ReportServiceStatus(win32service.SERVICE_PAUSED)
-            logger.info("سرویس موقتاً متوقف شد (Pause).")
+            logger.info("service paused by the manager.")
             if self._runner is not None:
-                self._runner.pause("سرویس توسط مدیر متوقف شد")
+                self._runner.pause("paused by the service manager")
 
         def SvcContinue(self):
             self.ReportServiceStatus(win32service.SERVICE_RUNNING)
-            logger.info("سرویس از حالت توقف خارج شد (Continue).")
+            logger.info("service resumed by the manager.")
             if self._runner is not None:
                 self._runner.resume()
 
@@ -101,7 +101,7 @@ if PYWIN32_AVAILABLE:  # pragma: no cover - فقط ویندوز
             setup_logging(self._config)
             for issue in self._issues:
                 logger.warning(
-                    "پیکربندی: [%s] %s = %r → %s",
+                    "config: [%s] %s = %r -> %s",
                     issue.section,
                     issue.key,
                     issue.value,
@@ -110,7 +110,7 @@ if PYWIN32_AVAILABLE:  # pragma: no cover - فقط ویندوز
             try:
                 servicemanager.SetEventSourceName(EVENT_SOURCE_NAME, True)
             except Exception:  # pragma: no cover - بستگی به دسترسی دارد
-                logger.debug("ثبت Event Source ممکن نشد.")
+                logger.debug("could not register the event source.")
 
         def SvcDoRun(self):
             servicemanager.LogMsg(
@@ -128,7 +128,7 @@ if PYWIN32_AVAILABLE:  # pragma: no cover - فقط ویندوز
                 )
                 self._runner.run_forever()
             except Exception:
-                logger.exception("سرویس به‌دلیل خطای کشنده متوقف می‌شود.")
+                logger.exception("the service is stopping because of a fatal error.")
                 raise
             finally:
                 servicemanager.LogMsg(
@@ -144,7 +144,7 @@ else:  # pragma: no cover - لینوکس/مک
         """جانشین فقط برای این‌که import در تست‌ها نشکند."""
 
         def __init__(self, *args, **kwargs):
-            raise RuntimeError("سرویس ویندوز فقط روی ویندوز قابل استفاده است")
+            raise RuntimeError("the Windows service is only usable on Windows")
 
 
 __all__ = ["PYWIN32_AVAILABLE", "RamOptimizerService"]

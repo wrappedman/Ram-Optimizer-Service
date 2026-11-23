@@ -93,7 +93,7 @@ def test_failed_open_reports_error(base_config):
         load_error = "no windows"
 
     report = trim_working_sets(Broken(), None, base_config)  # type: ignore[arg-type]
-    assert report.error == "ویندوز در دسترس نیست"
+    assert report.error == "Windows API is not available"
 
 
 def test_purge_is_skipped_when_enough_memory_after_trim(base_config):

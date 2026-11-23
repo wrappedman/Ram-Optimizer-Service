@@ -229,14 +229,14 @@ class Win32Api:
         self.load_error: str = ""
         self._page_size: int | None = None
         if not IS_WINDOWS:
-            self.load_error = "این برنامه فقط روی ویندوز کار می‌کند"
+            self.load_error = "this program only runs on Windows"
             return
         try:  # pragma: no cover - فقط ویندوز
             self._load()
             self.available = True
         except (OSError, AttributeError, ValueError) as exc:  # pragma: no cover
             self.load_error = str(exc)
-            logger.error("بارگذاری توابع ویندوز ناموفق بود: %s", exc)
+            logger.error("could not load the Windows functions: %s", exc)
 
     # -- بارگذاری ----------------------------------------------------------
     def _load(self) -> None:  # pragma: no cover - فقط ویندوز
@@ -406,7 +406,7 @@ class Win32Api:
             ctypes.byref(returned),
         )
         if status != 0:
-            logger.debug("NtQuerySystemInformation(MemoryList) ناموفق: %s", ntstatus_name(status))
+            logger.debug("NtQuerySystemInformation(MemoryList) failed: %s", ntstatus_name(status))
             return None
         return info
 
@@ -421,7 +421,7 @@ class Win32Api:
     def memory_list_command(self, command: int) -> tuple[bool, str]:  # pragma: no cover
         """اجرای یک SYSTEM_MEMORY_LIST_COMMAND. خروجی: (موفق؟, توضیح خطا)."""
         if not self.available:
-            return False, "ویندوز در دسترس نیست"
+            return False, "Windows API is not available"
         value = wintypes.ULONG(command)
         status = self.ntdll.NtSetSystemInformation(
             SystemMemoryListInformation, ctypes.byref(value), ctypes.sizeof(value)

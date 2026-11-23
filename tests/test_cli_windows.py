@@ -36,7 +36,7 @@ def test_dry_run_lists_targets_and_changes_nothing(windows_like, capsys):
     assert main(["test", "--dry-run", "--include-fullscreen"]) == 0
     out = capsys.readouterr().out
 
-    assert "dry-run" in out
+    assert "dry run" in out
     assert "chrome.exe" in out
     assert api.trimmed_pids == set(), "در dry-run نباید هیچ پروسه‌ای trim شود"
     assert api.commands == [], "در dry-run نباید Standby List خالی شود"
@@ -72,4 +72,4 @@ def test_failed_cycle_exit_code(windows_like, capsys):
     api.open_denied = True
 
     assert main(["test", "--force", "--include-fullscreen"]) == 1
-    assert "هیچ تغییری" in capsys.readouterr().out
+    assert "nothing was changed" in capsys.readouterr().out

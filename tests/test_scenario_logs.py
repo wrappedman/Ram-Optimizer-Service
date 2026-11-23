@@ -73,9 +73,9 @@ def test_minute_cycle_then_immediate_critical_pass(caplog):
 
     # --- ۴) شواهد در لاگ --------------------------------------------------
     text = "\n".join(record.getMessage() for record in caplog.records)
-    assert "وضعیت بحرانی" in text, text
-    assert "اجرای فوری" in text, text
-    assert "پاک‌سازی انجام شد" in text, text
+    assert "CRITICAL" in text, text
+    assert "acting immediately" in text, text
+    assert "pass complete" in text, text
 
     # --- ۵) بازگشت به حالت عادی: دوباره ۶۰ ثانیه --------------------------
     api.used_bytes = int(4 * GB)
@@ -135,7 +135,7 @@ def test_loop_wakes_up_immediately_when_memory_turns_critical(caplog):
     assert runner.status.counters.get("purges", 0) >= 1
 
     text = "\n".join(record.getMessage() for record in caplog.records)
-    assert "بحرانی شد" in text, text
+    assert "went critical" in text or "critical became" in text or "turned critical" in text, text
     assert runner.status.state == "stopped"
 
 

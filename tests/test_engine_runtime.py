@@ -57,7 +57,7 @@ def test_useless_cycle_is_not_reported_as_success(base_config, fake_api, fake_pr
     result = engine.run_cycle()
 
     assert result.action is Action.SKIPPED
-    assert "دسترسی" in result.reason
+    assert "access denied" in result.reason
     assert engine.total_purges == 0
     assert engine.last_purge_at is None
     assert engine.consecutive_useless == 1
@@ -77,7 +77,7 @@ def test_force_cycle_bypasses_threshold(base_config, fake_api, fake_provider, cl
     engine = make_engine(base_config, fake_api, fake_provider, clock)
     result = engine.run_cycle(force=True)
     assert result.action is Action.OPTIMIZED
-    assert "دستی" in result.reason
+    assert "manual run" in result.reason
 
 
 def test_snapshot_failure_is_handled(base_config, fake_api, fake_provider, clock):
@@ -133,7 +133,7 @@ def test_after_optimize_mode_becomes_active_and_cooldown_applies(
     fake_api.used_bytes = int(14 * GB)  # هنوز پرفشار
     second = engine.run_cycle()
     assert second.action is Action.SKIPPED
-    assert "خنک‌شدن" in second.reason
+    assert "cooling down" in second.reason
 
 
 def test_backoff_increases_after_low_yield(base_config, fake_api, fake_provider, clock):
@@ -153,4 +153,4 @@ def test_standby_skip_reason_is_recorded(base_config, fake_api, fake_provider, c
     assert result.action is Action.OPTIMIZED
     assert result.purge is not None
     assert result.purge.purged is False
-    assert "آزاد است" in result.purge.skipped_reason
+    assert "already free" in result.purge.skipped_reason

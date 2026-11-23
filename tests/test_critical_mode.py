@@ -126,7 +126,7 @@ def test_critical_runs_immediately_even_inside_cooldown():
     decision = engine.decide(reading)
     assert decision.should_optimize is True
     assert decision.critical is True
-    assert "بحرانی" in decision.reason
+    assert "critical" in decision.reason.lower()
 
 
 def test_critical_requires_consecutive_polls_when_configured():

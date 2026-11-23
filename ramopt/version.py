@@ -15,8 +15,7 @@ EVENT_SOURCE_NAME = "RamOptimizerService"
 SERVICE_DESCRIPTION = (
     "Automatically frees RAM that programs have allocated but no longer use "
     "(working-set trimming + standby-list purge) only when memory is under real "
-    "pressure. | آزادسازی خودکار حافظه‌ای که برنامه‌ها اشغال کرده‌اند ولی دیگر "
-    "استفاده نمی‌کنند."
+    "pressure."
 )
 
 

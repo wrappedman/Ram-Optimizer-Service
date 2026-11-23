@@ -99,6 +99,36 @@ build\
 | ۱۱ | توقف/ادامه‌ی پاک‌سازی (سرویس روشن می‌ماند) |
 | ۱۲ | عیب‌یابی (نسخه، دسترسی، وضعیت سرویس) |
 | ۱۳ | **بررسی سناریو**: هر یک دقیقه + فوری در وضعیت بحرانی |
+| ۰ | خروج |
+
+نمای واقعی پنل (متن انگلیسی است تا در هر code page درست دیده شود):
+
+```
+============================================================
+  RAM Optimizer Service  -  Control Panel
+============================================================
+  exe             RamOptimizerService
+  path            C:\...\build\RamOptimizerService\RamOptimizerService.exe
+  service         RUNNING  (Automatic)
+  last cycle      78% used, normal
+
+  SERVICE
+    1  Install
+    2  Remove
+    3  Status
+    4  Logs
+
+  CONTROL
+    5  Start                         6  Stop
+    7  Restart                      10  Reload configuration
+   11  Pause / resume trimming
+
+  INSPECT
+    8  Dry run (no changes)           9  Configuration
+   12  Diagnostics                   13  Behaviour check
+
+    0  Exit
+```
 
 همان کارها بدون منو هم اجرا می‌شوند (مفید برای اسکریپت/CI):
 

@@ -252,10 +252,10 @@ def log_startup_banner(config: "Config", extra: dict[str, object] | None = None)
 
     info = build_info()
     logger.info("=" * 70)
-    logger.info("RAM Optimizer Service نسخه %s", info["version"])
+    logger.info("RAM Optimizer Service version %s", info["version"])
     logger.info(
-        "پیکربندی: آستانه %d%% (ریست %d%%) | فاصله %d ثانیه | cooldown %d ثانیه | "
-        "سقف %d/ساعت | standby purge=%s | min_free_after_trim=%dMB",
+        "configuration: trigger %d%% (reset %d%%) | interval %d s | cooldown %d s | "
+        "hourly cap %d | standby purge=%s | min_free_after_trim=%d MB",
         config.trigger_percent,
         config.reset_percent,
         config.check_interval_seconds,
@@ -265,18 +265,18 @@ def log_startup_banner(config: "Config", extra: dict[str, object] | None = None)
         config.min_free_mb_after_trim,
     )
     logger.info(
-        "امنیت: تمام‌صفحه=%s | باتری=%s | ساعت سکوت=%s | تأخیر شروع=%d ثانیه",
+        "guards: fullscreen=%s | battery=%s | quiet hours=%s | startup delay=%d s",
         config.skip_when_fullscreen,
         config.skip_on_battery,
-        config.quiet_hours or "غیرفعال",
+        config.quiet_hours or "off",
         config.startup_delay_seconds,
     )
     logger.info(
-        "محیط: Python %s | frozen=%s | %s", info["python"], info["frozen"], info["platform"]
+        "environment: Python %s | frozen=%s | %s", info["python"], info["frozen"], info["platform"]
     )
-    logger.info("پوشه‌ی داده‌ها: %s", paths.data_dir())
+    logger.info("data folder: %s", paths.data_dir())
     if extra:
-        logger.info("وضعیت اضافی: %s", extra)
+        logger.info("extra status: %s", extra)
 
 
 __all__ = [

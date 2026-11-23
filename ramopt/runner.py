@@ -59,7 +59,7 @@ class OptimizerRunner:
             # آستانه‌ها عوض شده‌اند → حالت قبلی معنی ندارد
             self.engine._reset_state()
         logger.info(
-            "پیکربندی جدید اعمال شد | آستانه %d%% (ریست %d%%) | فاصله %d ثانیه | بحرانی %d%%",
+            "new configuration applied | trigger %d%% (reset %d%%) | interval %d s | critical %d%%",
             config.trigger_percent,
             config.reset_percent,
             config.check_interval_seconds,
@@ -68,7 +68,7 @@ class OptimizerRunner:
         self.status.extra["config_revision"] = self.status.extra.get("config_revision", 0) + 1
         self.status.write()
 
-    def pause(self, reason: str = "درخواست مدیر سرویس") -> None:
+    def pause(self, reason: str = "requested by the service manager") -> None:
         self.engine.pause(reason)
         self.status.state = "paused"
         self.status.extra["pause_reason"] = self.engine.pause_reason
@@ -90,7 +90,7 @@ class OptimizerRunner:
         log_startup_banner(self.config)
 
         if not self.api.available:
-            logger.error("Win32 در دسترس نیست: %s", self.api.load_error)
+            logger.error("Win32 is not available: %s", self.api.load_error)
         else:
             # فقط اختیارهایی که واقعاً لازم‌اند. SeDebugPrivilege لازم نیست و
             # فعال کردنش هشدار آنتی‌ویروس را بیشتر می‌کند.
@@ -98,8 +98,8 @@ class OptimizerRunner:
             missing = [name for name in required if not self.api.enable_privilege(name)]
             if missing:
                 logger.warning(
-                    "این اختیارها فعال نشدند: %s — برنامه احتمالاً با دسترسی "
-                    "Administrator/SYSTEM اجرا نشده؛ بخشی از حافظه پاک نخواهد شد.",
+                    "could not enable: %s - the process is probably not running as "
+                    "Administrator/SYSTEM, so some memory cannot be released.",
                     ", ".join(missing),
                 )
 
@@ -115,7 +115,7 @@ class OptimizerRunner:
         try:
             result = self.engine.run_cycle()
         except Exception as exc:  # pragma: no cover - دفاعی
-            logger.exception("خطای غیرمنتظره در چرخه‌ی بهینه‌سازی (ادامه می‌دهیم).")
+            logger.exception("unexpected error in the optimization cycle (continuing).")
             self.status.record_error(f"{type(exc).__name__}: {exc}", timestamp)
             self.status.last_cycle_at = timestamp
             self.status.last_action = "error"
@@ -153,7 +153,7 @@ class OptimizerRunner:
 
         if self._cycles % HEARTBEAT_EVERY_N_CYCLES == 0:
             logger.info(
-                "Heartbeat | چرخه %d | حالت %s | آپ‌تایم %s | مجموع پاک‌سازی %d (%.0fMB)",
+                "heartbeat | cycle %d | mode %s | uptime %s | passes %d (%.0f MB)",
                 self._cycles,
                 self.engine.mode.value,
                 _uptime_text(self.status.started_at),
@@ -190,18 +190,18 @@ class OptimizerRunner:
                 pass
 
         if command == "pause":
-            self.pause("درخواست از خط فرمان")
+            self.pause("requested from the command line")
         elif command == "resume":
             self.resume()
         elif command in ("reload", "config"):
             config, issues = load_config()
             for issue in issues:
-                logger.warning("پیکربندی: [%s] %s → %s", issue.key, issue.value, issue.message)
+                logger.warning("config: [%s] %s -> %s", issue.key, issue.value, issue.message)
             self.apply_config(config)
         elif command:
-            logger.warning("دستور ناشناخته در command.json: %r", command)
+            logger.warning("unknown command in command.json: %r", command)
         else:
-            logger.warning("command.json بدون کلید command — نادیده گرفته شد.")
+            logger.warning("command.json has no 'command' key - ignored.")
 
     def next_interval(self) -> int:
         """فاصله تا بررسی بعدی (ثانیه).
@@ -255,8 +255,8 @@ class OptimizerRunner:
                 return True
             if self._memory_is_critical():
                 logger.warning(
-                    "حافظه در فاصله‌ی بین دو چرخه بحرانی شد (≥%d%%) — "
-                    "چرخه‌ی بعدی همین حالا اجرا می‌شود (بدون انتظار برای %d ثانیه).",
+                    "memory went critical between cycles (>=%d%%) - "
+                    "running the next cycle now instead of waiting %d s.",
                     self.config.sustained_trigger_percent,
                     seconds,
                 )
@@ -267,8 +267,8 @@ class OptimizerRunner:
         """حلقه‌ی اصلی. با ``stop()`` بلافاصله خارج می‌شود (نه با خواب طولانی)."""
         self.prepare()
         logger.info(
-            "حلقه‌ی بهینه‌سازی شروع شد | بررسی عادی هر %d ثانیه | "
-            "در وضعیت بحرانی (≥%d%%) هر %d ثانیه (پایش هر %d ثانیه)",
+            "optimization loop started | normal check every %d s | "
+            "when critical (>=%d%%) poll every %d s (probe every %d s)",
             self.config.check_interval_seconds,
             self.config.sustained_trigger_percent,
             self.config.critical_poll_seconds,
@@ -285,7 +285,7 @@ class OptimizerRunner:
 
         self.status.state = "stopped"
         self.status.write()
-        logger.info("حلقه‌ی بهینه‌سازی متوقف شد.")
+        logger.info("optimization loop stopped.")
 
 
 def _uptime_text(started_at: str | None) -> str:
