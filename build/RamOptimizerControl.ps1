@@ -13,7 +13,8 @@
         RamOptimizerControl.ps1 -Action logs -Lines 200
 
     Actions: menu (default), install, remove, status, logs, start, stop,
-             restart, test, config, reload, pause, resume, verify, doctor.
+             restart, test, config, reload, pause, resume, verify, doctor,
+             repair.
 
     Deliberately compatible with Windows PowerShell 5.1 (the version that
     ships with Windows): this file is ASCII only, so no code page or
@@ -25,7 +26,7 @@
 param(
     [ValidateSet('menu', 'install', 'remove', 'status', 'logs', 'start', 'stop',
         'restart', 'test', 'config', 'reload', 'pause', 'resume', 'verify',
-        'doctor')]
+        'doctor', 'repair')]
     [string]$Action = 'menu',
 
     [int]$Lines = 60,
@@ -44,7 +45,7 @@ $script:LogLines = $Lines
 
 # Actions that need an elevated shell. Read-only actions do not.
 $script:NeedsAdmin = @('install', 'remove', 'start', 'stop', 'restart',
-    'reload', 'pause', 'resume')
+    'reload', 'pause', 'resume', 'repair')
 
 # ---------------------------------------------------------------------------
 # Console setup: UTF-8 + code page 65001 so exe output is not mangled.
@@ -99,6 +100,20 @@ function Find-Exe {
         if (Test-Path -LiteralPath $full -PathType Leaf) { return $full }
     }
     return $null
+}
+
+# Read one key from config.ini without depending on the exe. Returns the
+# fallback when the file or the key is missing, so the panel never lies about
+# the cadence it prints.
+function Get-ConfigValue([string]$Key, [string]$Fallback) {
+    $ini = Join-Path (Get-DataDir) 'config.ini'
+    if (-not (Test-Path -LiteralPath $ini)) { return $Fallback }
+    try {
+        $match = Select-String -LiteralPath $ini -Pattern ("^\s*" + $Key + "\s*=\s*(\S+)") |
+            Select-Object -First 1
+        if ($match) { return $match.Matches[0].Groups[1].Value }
+    } catch { }
+    return $Fallback
 }
 
 function Test-Admin {
@@ -158,7 +173,7 @@ function Invoke-Install {
     if (-not (Confirm-Admin 'install')) { return 2 }
     if (Invoke-Exe -ExeArgs @('service', 'install', '--wait', '25') -AllowFail) {
         Write-Bad 'Installation failed - see the message above.'
-        Write-Note 'If the service is already installed, use "repair" or remove it first.'
+        Write-Note 'Already installed? Use option 14 (repair) or remove it first.'
         return 1
     }
     Invoke-Exe -ExeArgs @('config', '--init') -AllowFail | Out-Null
@@ -168,8 +183,11 @@ function Invoke-Install {
     } else {
         Write-Note 'not visible yet - run status again in a few seconds'
     }
+    $interval = Get-ConfigValue 'check_interval_seconds' '60'
+    $critical = Get-ConfigValue 'sustained_trigger_percent' '92'
     Write-KeyValue 'config file' (Join-Path (Get-DataDir) 'config.ini')
-    Write-KeyValue 'behaviour' 'release pass every 60 s; immediate at 92% used'
+    Write-KeyValue 'behaviour' "release pass every $interval s; immediate at $critical% used"
+    Write-KeyValue 'verify' 'menu option 13, or: RamOptimizerService.exe verify --simulate-critical'
     return 0
 }
 
@@ -388,6 +406,7 @@ function Invoke-Named([string]$Name) {
         'reload' { return (Invoke-Verb 'reload' 'Reload configuration' @('reload')) }
         'pause' { return (Invoke-Verb 'pause' 'Pause trimming' @('pause')) }
         'resume' { return (Invoke-Verb 'resume' 'Resume trimming' @('resume')) }
+        'repair' { return (Invoke-Verb 'repair' 'Repair installation' @('service', 'repair')) }
         default { return 2 }
     }
 }
@@ -447,6 +466,7 @@ function Show-Menu {
     Write-Host '  INSPECT' -ForegroundColor DarkGray
     Write-Host '    8  Dry run (no changes)           9  Configuration'
     Write-Host '   12  Diagnostics                   13  Behaviour check'
+    Write-Host '   14  Repair installation (fix the exe path after moving it)'
     Write-Host ''
     Write-Host '    0  Exit' -ForegroundColor DarkGray
     Write-Host ''
@@ -482,6 +502,7 @@ function Invoke-MenuAction([string]$Choice) {
         }
         '12' { Invoke-Named 'doctor' | Out-Null }
         '13' { Invoke-Named 'verify' | Out-Null }
+        '14' { Invoke-Named 'repair' | Out-Null }
         default { Write-Note "unknown option: $Choice" }
     }
 }
