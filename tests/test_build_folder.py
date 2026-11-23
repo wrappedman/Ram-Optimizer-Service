@@ -226,3 +226,44 @@ def test_build_scripts_share_one_implementation() -> None:
             assert '"' not in snippet and "'" not in snippet, f"quotes in -c: {line.strip()}"
     # اسکریپت باید ASCII باشد تا PowerShell 5.1 هم بدون BOM درست بخواند
     assert all(ord(char) < 128 for char in script), "tools/build_exe.ps1 must stay ASCII"
+
+
+def test_tool_scripts_survive_a_non_utf8_console(monkeypatch, capsys) -> None:
+    """اسکریپت‌های tools/ نباید روی کنسول cp1252 با UnicodeEncodeError بمیرند.
+
+    CI ویندوز دقیقاً همین را گرفت: ``make_version_info.py`` متن فارسی چاپ
+    می‌کرد و کنسول runner (cp1252) آن را نمی‌پذیرفت، پس بیلد در گام ۴ می‌افتاد.
+    """
+    import importlib.util
+    import io
+    import sys
+
+    class Cp1252Stdout(io.TextIOBase):
+        encoding = "cp1252"
+
+        def __init__(self) -> None:
+            self.buffer = []
+
+        def write(self, text: str) -> int:  # noqa: D401 - شبیه‌سازی
+            text.encode("cp1252")  # مثل کنسول واقعی: خطا می‌دهد
+            self.buffer.append(text)
+            return len(text)
+
+    monkeypatch.setattr(sys, "stdout", Cp1252Stdout())
+    monkeypatch.setattr(sys, "stderr", Cp1252Stdout())
+
+    tools_dir = ROOT / "tools"
+    sys.path.insert(0, str(tools_dir))
+    try:
+        spec = importlib.util.spec_from_file_location("console_helper", tools_dir / "_console.py")
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        # نباید استثنا بدهد
+        module.say("پیام فارسی")
+    finally:
+        sys.path.remove(str(tools_dir))
+
+    for tool in ("make_version_info.py", "make_build_info.py"):
+        source = (ROOT / "tools" / tool).read_text(encoding="utf-8")
+        assert "_console" in source and "force_utf8_console" in source

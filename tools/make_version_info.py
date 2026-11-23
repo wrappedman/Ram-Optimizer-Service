@@ -11,6 +11,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from _console import force_utf8_console, say  # noqa: E402
 
 from ramopt.version import SERVICE_DESCRIPTION, __version__
 
@@ -53,6 +56,7 @@ def version_tuple(version: str) -> tuple[int, int, int, int]:
 
 
 def main() -> int:
+    force_utf8_console()
     target = os.path.join(ROOT, "version_info.txt")
     content = TEMPLATE.format(
         tuple_version=version_tuple(__version__),
@@ -61,7 +65,7 @@ def main() -> int:
     )
     with open(target, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(content)
-    print(f"version_info.txt نوشته شد ({__version__}) → {target}")
+    say(f"version_info.txt نوشته شد ({__version__}) -> {target}")
     return 0
 
 

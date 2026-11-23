@@ -16,6 +16,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from _console import force_utf8_console, say  # noqa: E402
 
 from ramopt.version import __version__, build_info
 
@@ -40,9 +43,10 @@ def sha256(path: str) -> str:
 
 
 def main() -> int:
+    force_utf8_console()
     exe_path = os.path.join(ROOT, EXE_RELATIVE)
     if not os.path.isfile(exe_path):
-        print(f"[خطا] exe پیدا نشد: {exe_path}")
+        say(f"[خطا] exe پیدا نشد: {exe_path}")
         return 1
 
     info = build_info()
@@ -67,7 +71,7 @@ def main() -> int:
     with open(os.path.join(ROOT, "build", "SHA256SUMS.txt"), "w", encoding="utf-8") as handle:
         handle.write(f"{payload['exe_sha256']}  {payload['exe']}\n")
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    say(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 
