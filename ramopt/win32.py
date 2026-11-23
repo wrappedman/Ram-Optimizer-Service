@@ -31,6 +31,7 @@ LONG = ctypes.c_int32
 WORD = ctypes.c_uint16
 BYTE = ctypes.c_uint8
 BOOL = ctypes.c_int32
+SIZE_T = ctypes.c_size_t
 
 # ----------------------------------------------------------------------------
 # ثابت‌ها
@@ -82,10 +83,17 @@ _NTSTATUS_NAMES = {
 
 
 def ntstatus_name(status: int) -> str:
-    """تبدیل NTSTATUS به نام خوانا (برای لاگ عیب‌یابی)."""
-    if status >= 0:
+    """تبدیل NTSTATUS به نام خوانا (برای لاگ عیب‌یابی).
+
+    NTSTATUS در ctypes با ``LONG`` (int32 علامت‌دار) برمی‌گردد، ولی برای
+    خوانایی/تست ممکن است به‌صورت مقدار 32 بیتی بدون علامت (0xC0000061) هم
+    داده شود؛ هر دو حالت یکسان پاسخ می‌دهند.
+    """
+    value = int(status) & 0xFFFFFFFF
+    # بیت ۳۱ = خطا (severity == error) → STATUS_SUCCESS نیست
+    if value & 0x80000000 == 0:
         return "STATUS_SUCCESS"
-    return _NTSTATUS_NAMES.get(status & 0xFFFFFFFF, f"NTSTATUS 0x{status & 0xFFFFFFFF:08X}")
+    return _NTSTATUS_NAMES.get(value, f"NTSTATUS 0x{value:08X}")
 
 
 # ----------------------------------------------------------------------------
@@ -106,6 +114,8 @@ class TOKEN_PRIVILEGES(ctypes.Structure):
 
 
 class MEMORYSTATUSEX(ctypes.Structure):
+    # چیدمان ABI ویندوز: حداکثر تراز ۸ بایت (پیش‌فرض پایتون ۳.۱۲ = ۱۶)
+    _pack_ = 8
     """وضعیت حافظه از دید ویندوز (معادل چیزی که Task Manager نشان می‌دهد)."""
 
     _fields_ = [
@@ -122,6 +132,8 @@ class MEMORYSTATUSEX(ctypes.Structure):
 
 
 class SYSTEM_MEMORY_LIST_INFORMATION(ctypes.Structure):
+    # چیدمان ABI ویندوز: حداکثر تراز ۸ بایت (پیش‌فرض پایتون ۳.۱۲ = ۱۶)
+    _pack_ = 8
     """شمارش صفحات هر لیست حافظه — همان اعدادی که RAMMap نشان می‌دهد."""
 
     _fields_ = [
@@ -136,23 +148,33 @@ class SYSTEM_MEMORY_LIST_INFORMATION(ctypes.Structure):
     ]
 
 
-class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
+class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+    """ساختار استاندارد GetProcessMemoryInfo (روی x64 = 72 بایت).
+
+    ``PROCESS_MEMORY_COUNTERS_EX`` فقط یک فیلد بیشتر (``PrivateUsage``) دارد و
+    همان ۷۲ بایت اول را دارد، پس می‌توان همیشه از نسخه‌ی استاندارد استفاده کرد
+    و در صورت نیاز همان ۷۲ بایت را به EX تفسیر کرد. این کار وابستگی به
+    ``SIZE_T`` در چیدمان را کم می‌کند.
+    """
+
+    _pack_ = 8
     _fields_ = [
         ("cb", DWORD),
         ("PageFaultCount", DWORD),
-        ("PeakWorkingSetSize", ctypes.c_size_t),
-        ("WorkingSetSize", ctypes.c_size_t),
-        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-        ("PagefileUsage", ctypes.c_size_t),
-        ("PeakPagefileUsage", ctypes.c_size_t),
-        ("PrivateUsage", ctypes.c_size_t),
+        ("PeakWorkingSetSize", SIZE_T),
+        ("WorkingSetSize", SIZE_T),
+        ("QuotaPeakPagedPoolUsage", SIZE_T),
+        ("QuotaPagedPoolUsage", SIZE_T),
+        ("QuotaPeakNonPagedPoolUsage", SIZE_T),
+        ("QuotaNonPagedPoolUsage", SIZE_T),
+        ("PagefileUsage", SIZE_T),
+        ("PeakPagefileUsage", SIZE_T),
     ]
 
 
 class SYSTEM_POWER_STATUS(ctypes.Structure):
+    # چیدمان ABI ویندوز: حداکثر تراز ۸ بایت (پیش‌فرض پایتون ۳.۱۲ = ۱۶)
+    _pack_ = 8
     _fields_ = [
         ("ACLineStatus", BYTE),
         ("BatteryFlag", BYTE),
@@ -252,7 +274,7 @@ class Win32Api:
         self.psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
         self.psapi.GetProcessMemoryInfo.argtypes = [
             wintypes.HANDLE,
-            ctypes.POINTER(PROCESS_MEMORY_COUNTERS_EX),
+            ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
             wintypes.DWORD,
         ]
 
@@ -265,7 +287,7 @@ class Win32Api:
             k32.K32GetProcessMemoryInfo.restype = wintypes.BOOL
             k32.K32GetProcessMemoryInfo.argtypes = [
                 wintypes.HANDLE,
-                ctypes.POINTER(PROCESS_MEMORY_COUNTERS_EX),
+                ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
                 wintypes.DWORD,
             ]
 
@@ -302,7 +324,8 @@ class Win32Api:
             wintypes.LPVOID,
         ]
 
-        self.shell32.SHQueryUserNotificationState.restype = wintypes.HRESULT
+        # HRESULT در ctypes.wintypes تعریف نشده است (فقط در برخی نسخه‌ها)
+        self.shell32.SHQueryUserNotificationState.restype = ctypes.c_long
         self.shell32.SHQueryUserNotificationState.argtypes = [ctypes.POINTER(wintypes.INT)]
 
     # -- اختیارها ----------------------------------------------------------
@@ -424,8 +447,8 @@ class Win32Api:
         return bool(self.psapi.EmptyWorkingSet(wintypes.HANDLE(handle)))
 
     def working_set_size(self, handle: int) -> int:  # pragma: no cover
-        counters = PROCESS_MEMORY_COUNTERS_EX()
-        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
+        counters = PROCESS_MEMORY_COUNTERS()
+        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
         getter = getattr(self.kernel32, "K32GetProcessMemoryInfo", None) or getattr(
             self.psapi, "GetProcessMemoryInfo", None
         )
@@ -466,6 +489,8 @@ class Win32Api:
 
 
 class _SystemInfo(ctypes.Structure):
+    # چیدمان ABI ویندوز: حداکثر تراز ۸ بایت (پیش‌فرض پایتون ۳.۱۲ = ۱۶)
+    _pack_ = 8
     _fields_ = [
         ("wProcessorArchitecture", WORD),
         ("wReserved", WORD),
