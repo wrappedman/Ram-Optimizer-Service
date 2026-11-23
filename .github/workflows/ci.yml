@@ -15,8 +15,9 @@ jobs:
   # Lint + cross-platform unit tests (fast, no Windows needed)
   # ---------------------------------------------------------------------------
   quality:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.9", "3.11", "3.13"]
     steps:
@@ -31,7 +32,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
-          python -m pip install psutil
 
       - name: Ruff (lint)
         run: ruff check .
