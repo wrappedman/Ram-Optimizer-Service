@@ -217,5 +217,12 @@ def test_build_scripts_share_one_implementation() -> None:
     assert "tools\\build_exe.ps1" in nested
     script = (ROOT / "tools" / "build_exe.ps1").read_text(encoding="utf-8")
     assert "3.13" in script and "py -" in script
+    # هر -c که به پایتون داده می‌شود نباید کوتیشن داشته باشد: PowerShell هنگام
+    # فراخوانی exe کوتیشن‌های داخل آرگومان را حذف می‌کند و python با SyntaxError
+    # می‌میرد (همین یک CI را قرمز کرد).
+    for line in script.splitlines():
+        if " -c " in line:
+            snippet = line.split(" -c ", 1)[1]
+            assert '"' not in snippet and "'" not in snippet, f"quotes in -c: {line.strip()}"
     # اسکریپت باید ASCII باشد تا PowerShell 5.1 هم بدون BOM درست بخواند
     assert all(ord(char) < 128 for char in script), "tools/build_exe.ps1 must stay ASCII"

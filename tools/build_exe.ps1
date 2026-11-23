@@ -69,9 +69,14 @@ function Split-CommandLine([string]$CommandLine) {
 #    nothing and exits non-zero; that must be a normal "not usable" answer.
 #  * `py -3.11` prints "No runtime installed that matches 3.11" on stderr and
 #    exits non-zero: same answer.
-function Get-PythonVersion([string]$CommandLine) {
+#
+# The returned value is an integer like 311 for 3.11, because a -c snippet with
+# any quotes ("%d.%d" etc.) loses them when PowerShell hands it to a native
+# executable: python then received `print(%d.%d % (...))` and died with
+# SyntaxError. A quote-free expression sidesteps the whole problem.
+function Get-PythonVersionCode([string]$CommandLine) {
     $split = Split-CommandLine $CommandLine
-    $code = 'import sys; print("%d.%d" % (sys.version_info[0], sys.version_info[1]))'
+    $code = 'import sys; print(sys.version_info[0]*100 + sys.version_info[1])'
     $output = $null
     try {
         $output = & $split.Exe @($split.Args) -c $code
@@ -81,19 +86,20 @@ function Get-PythonVersion([string]$CommandLine) {
     }
     if ($exit -ne 0 -or -not $output) { return $null }
     $text = ($output | Select-Object -First 1).ToString().Trim()
-    if ($text -notmatch '^\d+\.\d+$') { return $null }
-    return $text
+    if ($text -notmatch '^\d+$') { return $null }
+    return [int]$text
 }
 
-function Test-VenvVersion([string]$Version) {
-    if (-not $Version) { return $false }
-    $numbers = $Version.Split('.')
-    $major = [int]$numbers[0]
-    $minor = [int]$numbers[1]
-    if ($major -ne 3) { return $false }
-    if ($minor -lt 9) { return $false }
-    if ($minor -gt 13) { return $false }
-    return $true
+# 311 -> "3.11" (for messages only).
+function Format-VersionCode([int]$Code) {
+    if (-not $Code) { return '?' }
+    return ('{0}.{1}' -f [int][Math]::Floor($Code / 100), ($Code % 100))
+}
+
+# 3.9 - 3.13: what PyInstaller supports and what this project targets.
+function Test-SupportedVersion([int]$Code) {
+    if (-not $Code) { return $false }
+    return ($Code -ge 309 -and $Code -le 313)
 }
 
 # --- 0) pick an interpreter -------------------------------------------------
@@ -106,12 +112,12 @@ Write-Host '============================================================' -Foreg
 $venvPython = Join-Path $script:Root '.venv\Scripts\python.exe'
 $reuseVenv = $false
 if (Test-Path -LiteralPath $venvPython) {
-    $existing = Get-PythonVersion $venvPython
-    if (Test-VenvVersion $existing) {
+    $existing = Get-PythonVersionCode $venvPython
+    if (Test-SupportedVersion $existing) {
         $reuseVenv = $true
-        Write-Ok "reusing .venv (Python $existing)"
+        Write-Ok "reusing .venv (Python $(Format-VersionCode $existing))"
     } elseif ($existing) {
-        Write-Note ".venv uses Python $existing, which PyInstaller does not support."
+        Write-Note ".venv uses Python $(Format-VersionCode $existing), which PyInstaller does not support."
         Write-Note 'Deleting .venv and creating a supported one...'
         Remove-Item -LiteralPath (Join-Path $script:Root '.venv') -Recurse -Force
     }
@@ -126,14 +132,14 @@ if (-not $reuseVenv) {
     $candidates += 'python3'
 
     foreach ($candidate in $candidates) {
-        $version = Get-PythonVersion $candidate
+        $version = Get-PythonVersionCode $candidate
         if (-not $version) { continue }
-        if (Test-VenvVersion $version) {
+        if (Test-SupportedVersion $version) {
             $chosen = $candidate
-            Write-Ok "found Python $version via '$candidate'"
+            Write-Ok "found Python $(Format-VersionCode $version) via '$candidate'"
             break
         } else {
-            Write-Note "'$candidate' is Python $version - not usable for this build"
+            Write-Note "'$candidate' is Python $(Format-VersionCode $version) - not usable for this build"
         }
     }
 }
@@ -152,9 +158,9 @@ if (-not $reuseVenv -and -not $chosen) {
     foreach ($name in @('py', 'python', 'python3')) {
         $found = Get-Command $name -ErrorAction SilentlyContinue
         if ($found) {
-            $version = Get-PythonVersion $name
+            $version = Get-PythonVersionCode $name
             if ($version) {
-                Write-Host "     $name -> $version ($($found.Source))"
+                Write-Host "     $name -> $(Format-VersionCode $version) ($($found.Source))"
             } else {
                 Write-Host "     $name -> not usable ($($found.Source))"
             }
@@ -189,12 +195,12 @@ if ($reuseVenv) {
 }
 
 $py = $venvPython
-$venvVersion = Get-PythonVersion $py
-if (-not (Test-VenvVersion $venvVersion)) {
-    Write-Fail ".venv is Python $venvVersion - delete the .venv folder and run again."
+$venvVersion = Get-PythonVersionCode $py
+if (-not (Test-SupportedVersion $venvVersion)) {
+    Write-Fail ".venv is Python $(Format-VersionCode $venvVersion) - delete the .venv folder and run again."
     exit 1
 }
-Write-Ok "using .venv (Python $venvVersion)"
+Write-Ok "using .venv (Python $(Format-VersionCode $venvVersion))"
 
 # --- 2) requirements --------------------------------------------------------
 Write-Step '2/6 installing build requirements'
