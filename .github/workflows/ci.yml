@@ -134,6 +134,19 @@ jobs:
           & $exe test --dry-run
           if ($LASTEXITCODE -ne 0) { throw "dry-run failed" }
 
+      - name: Smoke test the scenario (every minute, immediate when critical)
+        shell: pwsh
+        run: |
+          # Read-only: verifies the real config values and that the critical
+          # branch fires at once. Nothing is trimmed here.
+          $exe = "build\RamOptimizerService\RamOptimizerService.exe"
+          $out = & $exe verify --simulate-critical 2>&1 | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0) { throw "verify failed" }
+          if ($out -notmatch 'هر 60 ثانیه') { throw "the 60 s cycle is not reported" }
+          if ($out -notmatch 'T\+0s') { throw "the immediate critical pass is not reported" }
+          if ($out -notmatch 'critical=True') { throw "the critical decision did not fire" }
+
       - name: Upload build/ (exe + control panel) as an artifact
         uses: actions/upload-artifact@v4
         with:
