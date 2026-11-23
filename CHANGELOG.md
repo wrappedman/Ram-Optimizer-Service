@@ -27,6 +27,25 @@
   در همان مسیر (`build\RamOptimizerService\…`) گذاشته می‌شود.
 - `build\build_info.json` و `build\SHA256SUMS.txt` برای هر بیلد.
 
+### بیلد: خطای «No runtime installed that matches 3.13»
+
+- **علت واقعی**: فایل `build_exe.bat` کامنت فارسی (UTF-8) داشت و `cmd.exe`
+  آن‌ها را با code page کنسول رمزگشایی می‌کند؛ نتیجه این بود که بلوک
+  `if not defined PYEXE` اشتباه اجرا می‌شد و پیام «No supported Python» چاپ
+  می‌شد در حالی که `py -3.13` وجود داشت. سپس `%PYEXE%` خالی اجرا می‌شد و
+  «The system cannot find the path specified» می‌داد.
+- **رفع**: منطق بیلد به `tools/build_exe.ps1` منتقل شد؛ هر سه فایل
+  `.bat` (لانچرها) اکنون **ASCII خالص با پایان‌خط CRLF** هستند و فقط
+  PowerShell را صدا می‌زنند. `.gitattributes` اضافه شد تا CRLF حفظ شود و
+  تست `test_bat_files_use_crlf_and_are_ascii` جلوی برگشت این باگ را می‌گیرد.
+- **پنل `RamOptimizerControl.ps1`**: BOM یوتی‌آف‌اضافه شد و متن فارسی با
+  escapeهای `` `u{...}`` ساخته می‌شود تا Windows PowerShell 5.1 هم درست
+  بخواند (بدون BOM، فایل با code page سیستم خوانده می‌شد).
+- **CI**: حالا دقیقاً همان `tools/build_exe.ps1` را اجرا می‌کند (پس اسکریپت
+  بیلد هم تست می‌شود) و CRLF/ASCII بودن لانچرها را بررسی می‌کند.
+- پیام‌های خطا حالا راه‌حل می‌دهند (`py install 3.11`،
+  `build_exe.bat -Python "py -3.11"`، یا استفاده از artifact آماده).
+
 ### اصلاح باگ‌های بیلد روی ویندوز کاربر
 
 - **تست ignore شکست می‌خورد اگر `git` در PATH نبود** (`FileNotFoundError`،

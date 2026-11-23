@@ -106,15 +106,16 @@ jobs:
           foreach ($line in $lines) { Write-Output "::error::$($line.Line)" }
           if (-not $lines) { Get-Content pytest-out.txt -Tail 40 | ForEach-Object { Write-Output "::error::$_" } }
 
-      - name: Build exe into build/
+      - name: Build with the shipping script (tools/build_exe.ps1)
         shell: pwsh
         run: |
-          python tools/make_version_info.py
-          pyinstaller --clean --noconfirm RamOptimizerService.spec
-          New-Item -ItemType Directory -Force -Path build | Out-Null
-          if (Test-Path build\RamOptimizerService) { Remove-Item -Recurse -Force build\RamOptimizerService }
-          Copy-Item -Recurse -Force dist\RamOptimizerService build\RamOptimizerService
-          python tools/make_build_info.py
+          # Run the same script users run, so a broken build script fails CI.
+          # -SkipTests: the suite already ran above.
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_exe.ps1 -SkipTests
+          if ($LASTEXITCODE -ne 0) { throw "build_exe.ps1 failed with $LASTEXITCODE" }
+          if (-not (Test-Path build\RamOptimizerService\RamOptimizerService.exe)) {
+            throw "build_exe.ps1 did not produce the exe"
+          }
 
       - name: Check the control panel in build/
         shell: pwsh
@@ -127,6 +128,12 @@ jobs:
           if ($errors.Count) {
             $errors | ForEach-Object { Write-Output "::error::PS syntax: $($_.Message)" }
             exit 1
+          }
+          # The .bat launchers must have CRLF + ASCII, and the panel a BOM.
+          foreach ($bat in @('build_exe.bat', 'build\build_exe.bat', 'build\Manage-RamOptimizer.bat')) {
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $bat))
+            if ($bytes -contains 13 -eq $false) { throw "$bat has no CRLF line endings" }
+            if (($bytes | Where-Object { $_ -gt 127 }).Count -gt 0) { throw "$bat contains non-ASCII bytes" }
           }
           $help = & powershell -NoProfile -ExecutionPolicy Bypass -File build\RamOptimizerControl.ps1 -Action doctor
           if ($LASTEXITCODE -ne 0) { throw "control panel doctor failed" }

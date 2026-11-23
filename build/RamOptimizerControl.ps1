@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     RAM Optimizer Service - control panel (install / remove / status / logs).
 
@@ -47,6 +47,25 @@ $script:NeedsAdmin = @('install', 'remove', 'start', 'stop', 'restart', 'test',
 # ---------------------------------------------------------------------------
 # Output helpers: UTF-8 console so Persian text is readable in cmd.exe.
 # ---------------------------------------------------------------------------
+# PowerShell 5.1 needs the `u{...} escapes below; Windows PowerShell on an old
+# .NET/older build can lack them. If so, retry once with UTF-8 enabled.
+try {
+    $null = "`u{0627}"
+} catch {
+    if (-not $env:RAMOPT_PANEL_UTF8) {
+        $env:RAMOPT_PANEL_UTF8 = '1'
+        $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath))
+        $PSBoundParameters.Keys | ForEach-Object {
+            if ($_ -in @('Action', 'Lines')) { $args += @("-$_", $PSBoundParameters[$_]) }
+        }
+        $args += '-NoPause'
+        & powershell.exe @args
+        exit $LASTEXITCODE
+    }
+    Write-Host '[FAIL] Windows PowerShell here is too old for this panel; use PowerShell 7 (pwsh).' -ForegroundColor Red
+    exit 1
+}
+
 try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -310,7 +329,6 @@ function Invoke-Verb([string]$Action, [string]$Head, [string[]]$ExeArgs) {
 }
 
 function Invoke-Verify {
-    # فقط خواندن است: نیازی به elevation ندارد.
     Write-Head 'Scenario check: every minute, and immediately when critical'
     if (Invoke-Exe -ExeArgs @('verify', '--simulate-critical') -AllowFail) { return 1 }
     Write-Ok 'The service trims on a 60 s cycle and reacts to critical memory at once.'
@@ -347,27 +365,27 @@ function Show-Menu {
     $service = Get-ServiceState
     Write-Host ('=' * 68) -ForegroundColor DarkCyan
     Write-Host '   RAM Optimizer Service - Control Panel' -ForegroundColor Cyan
-    Write-Host '   پنل مدیریت سرویس بهینه‌ساز حافظه' -ForegroundColor Cyan
+    Write-Host '   `u{067E}`u{0646}`u{0644} `u{0645}`u{062F}`u{06CC}`u{0631}`u{06CC}`u{062A} `u{0633}`u{0631}`u{0648}`u{06CC}`u{0633} `u{0628}`u{0647}`u{06CC}`u{0646}`u{0647}`u{200C}`u{0633}`u{0627}`u{0632} `u{062D}`u{0627}`u{0641}`u{0638}`u{0647}' -ForegroundColor Cyan
     Write-Host ('=' * 68) -ForegroundColor DarkCyan
     if ($exe) { Write-Host "  exe    : $exe" -ForegroundColor DarkGray }
     else { Write-Host '  exe    : NOT FOUND - run build_exe.bat first' -ForegroundColor Red }
     if ($service) { Write-Host "  service: $($service.Status) / $($service.StartType)" -ForegroundColor DarkGray }
     else { Write-Host '  service: not installed' -ForegroundColor DarkGray }
     Write-Host ''
-    Write-Host '   1  Install the service              نصب'
-    Write-Host '   2  Remove the service               حذف'
-    Write-Host '   3  Status                           وضعیت'
-    Write-Host '   4  Logs                             لاگ‌ها'
-    Write-Host '   5  Start                            اجرا'
-    Write-Host '   6  Stop                             توقف'
-    Write-Host '   7  Restart                          ری‌استارت'
-    Write-Host '   8  Dry run (no changes)             آزمون بی‌خطر'
-    Write-Host '   9  Config file (open / validate)    پیکربندی'
-    Write-Host '  10  Reload config in the service     بازخوانی پیکربندی'
-    Write-Host '  11  Pause / resume trimming          توقف/ادامه‌ی پاک‌سازی'
-    Write-Host '  12  Diagnostics                      عیب‌یابی'
-    Write-Host '  13  Verify 1-minute / critical mode  بررسی سناریو'
-    Write-Host '   0  Exit                             خروج'
+    Write-Host '   1  Install the service              `u{0646}`u{0635}`u{0628}'
+    Write-Host '   2  Remove the service               `u{062D}`u{0630}`u{0641}'
+    Write-Host '   3  Status                           `u{0648}`u{0636}`u{0639}`u{06CC}`u{062A}'
+    Write-Host '   4  Logs                             `u{0644}`u{0627}`u{06AF}`u{200C}`u{0647}`u{0627}'
+    Write-Host '   5  Start                            `u{0627}`u{062C}`u{0631}`u{0627}'
+    Write-Host '   6  Stop                             `u{062A}`u{0648}`u{0642}`u{0641}'
+    Write-Host '   7  Restart                          `u{0631}`u{06CC}`u{200C}`u{0627}`u{0633}`u{062A}`u{0627}`u{0631}`u{062A}'
+    Write-Host '   8  Dry run (no changes)             `u{0622}`u{0632}`u{0645}`u{0648}`u{0646} `u{0628}`u{06CC}`u{200C}`u{062E}`u{0637}`u{0631}'
+    Write-Host '   9  Config file (open / validate)    `u{067E}`u{06CC}`u{06A9}`u{0631}`u{0628}`u{0646}`u{062F}`u{06CC}'
+    Write-Host '  10  Reload config in the service     `u{0628}`u{0627}`u{0632}`u{062E}`u{0648}`u{0627}`u{0646}`u{06CC} `u{067E}`u{06CC}`u{06A9}`u{0631}`u{0628}`u{0646}`u{062F}`u{06CC}'
+    Write-Host '  11  Pause / resume trimming          `u{062A}`u{0648}`u{0642}`u{0641}/`u{0627}`u{062F}`u{0627}`u{0645}`u{0647}`u{200C}`u{06CC} `u{067E}`u{0627}`u{06A9}`u{200C}`u{0633}`u{0627}`u{0632}`u{06CC}'
+    Write-Host '  12  Diagnostics                      `u{0639}`u{06CC}`u{0628}`u{200C}`u{06CC}`u{0627}`u{0628}`u{06CC}'
+    Write-Host '  13  Verify 1-minute / critical mode  `u{0628}`u{0631}`u{0631}`u{0633}`u{06CC} `u{0633}`u{0646}`u{0627}`u{0631}`u{06CC}`u{0648}'
+    Write-Host '   0  Exit                             `u{062E}`u{0631}`u{0648}`u{062C}'
     Write-Host ''
 }
 

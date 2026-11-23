@@ -87,6 +87,23 @@ def test_exe_output_is_not_committed_but_the_panel_is() -> None:
     assert _git_check_ignore("build/RamOptimizerControl.ps1").returncode == 1
 
 
+def test_panel_script_is_utf8_bom_and_ascii() -> None:
+    """پنل باید BOM داشته باشد و بدنه‌اش ASCII باشد.
+
+    Windows PowerShell 5.1 فایل بدون BOM را با code page سیستم (مثلاً
+    windows-1256) می‌خواند و متن فارسی در رشته‌ها خراب می‌شد. با BOM همیشه
+    UTF-8 خوانده می‌شود؛ و escapeهای ```u{...}`` متن فارسی را از منبع ASCII
+    می‌سازند تا هیچ‌جای زنجیره‌ی بیلد به code page وابسته نباشد.
+    """
+    data = PANEL.read_bytes()
+    assert data[:3] == b"\xef\xbb\xbf", "RamOptimizerControl.ps1 must start with a UTF-8 BOM"
+    body = data[3:].decode("utf-8")
+    assert body.count("\r\n") == body.count("\n"), "PS1 must use CRLF"
+    non_ascii = [line for line in body.splitlines() if any(ord(char) > 127 for char in line)]
+    assert non_ascii == [], f"keep the panel ASCII (Persian via `u{{...}}): {non_ascii[:2]}"
+    assert "`u{" in body, "Persian strings should use escape sequences"
+
+
 def test_bat_launches_the_powershell_panel() -> None:
     text = (BUILD / "Manage-RamOptimizer.bat").read_text(encoding="utf-8", errors="replace")
     assert "RamOptimizerControl.ps1" in text
@@ -163,3 +180,42 @@ def test_git_is_present_when_required() -> None:
     if os.environ.get("RAMOPT_REQUIRE_GIT_TESTS") != "1":
         pytest.skip("RAMOPT_REQUIRE_GIT_TESTS=1 تنظیم نشده است")
     assert _git_check_ignore("build/RamOptimizerControl.ps1") is not None, "git در PATH نیست"
+
+
+def test_bat_files_use_crlf_and_are_ascii() -> None:
+    """``.bat``هایی که cmd.exe می‌خواند باید CRLF و ASCII باشند.
+
+    دو باگ واقعی که همین‌جا گرفته می‌شوند:
+
+    * فایلی که فقط LF دارد: cmd.exe دنباله‌ی بلوک‌های ``if``/``for`` را گم
+      می‌کند و شاخه‌ی اشتباه را اجرا می‌کند.
+    * کامنت فارسی UTF-8 در یک فایل batch: با code page کنسول رمزگشایی می‌شود
+      و می‌تواند باعث پریدن از بلوک شود (همین باعث شد پیام «No supported
+      Python» چاپ شود در حالی که ``py -3.13`` وجود داشت).
+    """
+    batch_files = [
+        ROOT / "build_exe.bat",
+        *sorted(BUILD.glob("*.bat")),
+        *sorted(ROOT.glob("*.bat")),
+    ]
+    checked = 0
+    for path in dict.fromkeys(batch_files):
+        data = path.read_bytes()
+        if b"\n" not in data:
+            continue
+        checked += 1
+        assert data.count(b"\r\n") == data.count(b"\n"), f"{path.name}: LF-only line endings"
+        assert not any(byte > 127 for byte in data), f"{path.name}: non-ASCII content"
+    assert checked >= 3, "the build/ batch files should exist"
+
+
+def test_build_scripts_share_one_implementation() -> None:
+    """منطق بیلد یک‌جا است (``tools/build_exe.ps1``)، نه دو نسخه‌ی جدا."""
+    launcher = (ROOT / "build_exe.bat").read_text(encoding="ascii")
+    nested = (BUILD / "build_exe.bat").read_text(encoding="ascii")
+    assert "tools\\build_exe.ps1" in launcher
+    assert "tools\\build_exe.ps1" in nested
+    script = (ROOT / "tools" / "build_exe.ps1").read_text(encoding="utf-8")
+    assert "3.13" in script and "py -" in script
+    # اسکریپت باید ASCII باشد تا PowerShell 5.1 هم بدون BOM درست بخواند
+    assert all(ord(char) < 128 for char in script), "tools/build_exe.ps1 must stay ASCII"

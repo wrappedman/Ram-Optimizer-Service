@@ -61,7 +61,10 @@
 
 ## نصب سریع (exe)
 
-1. **`build_exe.bat`** را دابل‌کلیک کنید (Python **۳.۹ تا ۳.۱۳**؛ PyInstaller فعلاً ۳.۱۴ را پشتیبانی نمی‌کند — اسکریپت خودش نسخه‌ی مناسب را پیدا می‌کند).
+1. **`build_exe.bat`** را دابل‌کلیک کنید. Python **۳.۹ تا ۳.۱۳** لازم است
+   (PyInstaller فعلاً ۳.۱۴+ را پشتیبانی نمی‌کند)؛ اسکریپت خودش نسخه‌ی مناسب را
+   با `py -3.13`/`py -3.11`/… پیدا می‌کند و اگر نبود راهنمای نصب می‌دهد.
+   برای انتخاب دستی: `build_exe.bat -Python "py -3.11"`.
 2. سرویس ساخته می‌شود در **`build\RamOptimizerService\RamOptimizerService.exe`**.
 3. **`build\Manage-RamOptimizer.bat`** را دابل‌کلیک کنید و گزینه‌ی **۱ (نصب)**
    را بزنید؛ در پنجره‌ی UAC گزینه‌ی Yes.
@@ -352,6 +355,19 @@ installer/          اسکریپت Inno Setup
 ---
 
 ## عیب‌یابی
+
+**خطای بیلد: «No runtime installed that matches 3.13» یا «No supported Python found»**
+
+یعنی روی سیستم فقط Python ۳.۱۴+ نصب است (یا نسخه‌ی ۳.۹–۳.۱۳ در PATH نیست).
+سه راه:
+
+```bat
+py install 3.11                 :: اگر Python Launcher داری
+build_exe.bat -Python "py -3.11"
+```
+
+یا اصلاً بیلد نکن: از GitHub → Actions → آخرین اجرای سبز → Artifacts →
+`RamOptimizerService-windows` دانلود کن و محتوای zip را در `build\` بریز.
 
 **خطای «The service did not respond to the start or control request in a timely fashion»**
 

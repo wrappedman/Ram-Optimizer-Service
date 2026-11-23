@@ -1,15 +1,17 @@
 @echo off
-rem ===========================================================================
-rem  RAM Optimizer Service - Control Panel   /   پنل مدیریت سرویس
-rem
-rem  یک فایل برای همه‌ی کارها: نصب، حذف، وضعیت، لاگ و کارهای عیب‌یابی.
-rem  Double-click it. It asks for Administrator rights only when the chosen
-rem  action needs them. Nothing runs in the background.
-rem
-rem  طراحی: منطق در PowerShell نوشته شده چون گرفتن خروجی exe، تشخیص UTF-8 و
-rem  منوی تعاملی در batch خالص شکننده است؛ batch فقط پوسته است.
-rem ===========================================================================
-setlocal EnableExtensions
+REM ===========================================================================
+REM  RAM Optimizer Service - Control Panel
+REM
+REM  One file for everything: install, remove, status, logs and more.
+REM  Double-click it. Administrator rights are requested only when the chosen
+REM  action needs them. Nothing runs in the background.
+REM
+REM  This file is pure ASCII with CRLF line endings on purpose: cmd.exe reads
+REM  batch files in the console code page, so UTF-8 comments can break the
+REM  block parser. All the logic (and all Persian text) is in
+REM  RamOptimizerControl.ps1, which PowerShell decodes as UTF-8.
+REM ===========================================================================
+setlocal
 title RAM Optimizer Service - Control Panel
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0RamOptimizerControl.ps1" %*
 set "RC=%ERRORLEVEL%"
