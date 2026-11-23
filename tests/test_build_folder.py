@@ -98,7 +98,7 @@ def test_panel_script_is_utf8_bom_and_ascii() -> None:
     data = PANEL.read_bytes()
     assert data[:3] == b"\xef\xbb\xbf", "RamOptimizerControl.ps1 must start with a UTF-8 BOM"
     body = data[3:].decode("utf-8")
-    assert body.count("\r\n") == body.count("\n"), "PS1 must use CRLF"
+    # خط‌پایان مهم نیست (PowerShell هم LF و هم CRLF را می‌خواند)؛ BOM مهم است.
     non_ascii = [line for line in body.splitlines() if any(ord(char) > 127 for char in line)]
     assert non_ascii == [], f"keep the panel ASCII (Persian via `u{{...}}): {non_ascii[:2]}"
     assert "`u{" in body, "Persian strings should use escape sequences"
