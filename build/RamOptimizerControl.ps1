@@ -1,89 +1,81 @@
-﻿<#
+<#
 .SYNOPSIS
-    RAM Optimizer Service - control panel (install / remove / status / logs).
+    RAM Optimizer Service - control panel for Windows.
 
 .DESCRIPTION
-    One file that does everything an operator needs. Double-click
-    Manage-RamOptimizer.bat (which calls this script), or run one action
-    non-interactively:
+    One file for install, remove, status, logs and day-to-day operation.
+    Launch it with Manage-RamOptimizer.bat (double-click), or run a single
+    action without the menu:
 
         RamOptimizerControl.ps1 -Action install
         RamOptimizerControl.ps1 -Action remove
         RamOptimizerControl.ps1 -Action status
-        RamOptimizerControl.ps1 -Action logs -Lines 100
+        RamOptimizerControl.ps1 -Action logs -Lines 200
 
     Actions: menu (default), install, remove, status, logs, start, stop,
-             restart, test, config, reload, pause, resume, doctor, verify.
+             restart, test, config, reload, pause, resume, verify, doctor.
 
-    Design notes
-    ------------
-    * The exe is looked up in this folder first, then ..\dist, then
-      ..\release, so the same script works in the source tree, in a release
-      zip, and next to a CI-built build\ folder.
-    * Administrator rights are requested only for the actions that need them.
-    * Exit codes: 0 = success, 1 = failure, 2 = nothing to do / warning.
+    Deliberately compatible with Windows PowerShell 5.1 (the version that
+    ships with Windows): this file is ASCII only, so no code page or
+    Unicode-escape syntax can break it. All user-facing text is English.
+
+    Exit codes: 0 = success, 1 = failure, 2 = nothing to do / warning.
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('menu', 'install', 'remove', 'status', 'logs', 'start', 'stop',
-        'restart', 'test', 'config', 'reload', 'pause', 'resume', 'doctor',
-        'verify')]
+        'restart', 'test', 'config', 'reload', 'pause', 'resume', 'verify',
+        'doctor')]
     [string]$Action = 'menu',
 
-    [int]$Lines = 80,
+    [int]$Lines = 60,
+    [switch]$NoWait,
     [switch]$NoPause
 )
 
-$ErrorActionPreference = 'Stop'
+# Do not let a failing helper abort the whole panel: every step below checks
+# the exit code of the exe itself.
+$ErrorActionPreference = 'Continue'
 $script:Root = Split-Path -Parent $PSCommandPath
 $script:ScriptPath = $PSCommandPath
 $script:ServiceName = 'RamOptimizerService'
 $script:SawProblem = $false
-# Actions that need elevation; 'status', 'logs', 'config', 'doctor' and
-# 'verify' only read, so a normal user can run them.
-$script:NeedsAdmin = @('install', 'remove', 'start', 'stop', 'restart', 'test',
+$script:LogLines = $Lines
+
+# Actions that need an elevated shell. Read-only actions do not.
+$script:NeedsAdmin = @('install', 'remove', 'start', 'stop', 'restart',
     'reload', 'pause', 'resume')
 
 # ---------------------------------------------------------------------------
-# Output helpers: UTF-8 console so Persian text is readable in cmd.exe.
+# Console setup: UTF-8 + code page 65001 so exe output is not mangled.
 # ---------------------------------------------------------------------------
-# PowerShell 5.1 needs the `u{...} escapes below; Windows PowerShell on an old
-# .NET/older build can lack them. If so, retry once with UTF-8 enabled.
 try {
-    $null = "`u{0627}"
-} catch {
-    if (-not $env:RAMOPT_PANEL_UTF8) {
-        $env:RAMOPT_PANEL_UTF8 = '1'
-        $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath))
-        $PSBoundParameters.Keys | ForEach-Object {
-            if ($_ -in @('Action', 'Lines')) { $args += @("-$_", $PSBoundParameters[$_]) }
-        }
-        $args += '-NoPause'
-        & powershell.exe @args
-        exit $LASTEXITCODE
-    }
-    Write-Host '[FAIL] Windows PowerShell here is too old for this panel; use PowerShell 7 (pwsh).' -ForegroundColor Red
-    exit 1
-}
-
-try {
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    $OutputEncoding = [System.Text.Encoding]::UTF8
-    if ($Host.Name -eq 'ConsoleHost') { cmd /c chcp 65001 | Out-Null }
+    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    if ($Host.Name -eq 'ConsoleHost') { cmd /c chcp 65001 > $null 2>&1 }
 } catch { }
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+$script:UiWidth = 68
 
 function Write-Head([string]$Text) {
     Write-Host ''
-    Write-Host ('=' * 68) -ForegroundColor DarkCyan
+    Write-Host ('-' * $script:UiWidth) -ForegroundColor DarkGray
     Write-Host "  $Text" -ForegroundColor Cyan
-    Write-Host ('=' * 68) -ForegroundColor DarkCyan
+    Write-Host ('-' * $script:UiWidth) -ForegroundColor DarkGray
 }
 
-function Write-Ok([string]$Text) { Write-Host "[OK]   $Text" -ForegroundColor Green }
-function Write-Note([string]$Text) { Write-Host "[i]    $Text" -ForegroundColor Yellow }
+function Write-Ok([string]$Text) { Write-Host "[ ok ]  $Text" -ForegroundColor Green }
+function Write-Note([string]$Text) { Write-Host "[ .. ]  $Text" -ForegroundColor Yellow }
 function Write-Bad([string]$Text) {
-    Write-Host "[FAIL] $Text" -ForegroundColor Red
+    Write-Host "[FAIL]  $Text" -ForegroundColor Red
     $script:SawProblem = $true
+}
+
+function Write-KeyValue([string]$Key, [string]$Value, [string]$Color = 'Gray') {
+    Write-Host ('  {0,-14} {1}' -f $Key, $Value) -ForegroundColor $Color
 }
 
 # ---------------------------------------------------------------------------
@@ -115,26 +107,25 @@ function Test-Admin {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Re-launches this script elevated for one action. Returns $true when the
-# caller may continue, $false when everything was already handled.
+# Re-run this script elevated for one action. $true = caller may continue.
 function Confirm-Admin([string]$ForAction) {
     if (Test-Admin) { return $true }
-    Write-Note 'This action needs Administrator rights - asking for elevation...'
+    Write-Note "This action needs Administrator rights - asking for elevation..."
     $arguments = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
         '-File', ('"{0}"' -f $script:ScriptPath),
-        '-Action', $ForAction, '-Lines', $Lines
+        '-Action', $ForAction, '-Lines', $script:LogLines, '-NoWait'
     )
     try {
         Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Verb RunAs -Wait
     } catch {
-        Write-Bad 'Elevation was refused. Right-click Manage-RamOptimizer.bat -> Run as administrator.'
+        Write-Bad 'Elevation was refused. Right-click Manage-RamOptimizer.bat and choose "Run as administrator".'
     }
     return $false
 }
 
 # ---------------------------------------------------------------------------
-# Running the exe: output goes to the screen, only the exit code is returned.
+# Running the exe. Returns its exit code; output goes straight to the console.
 # ---------------------------------------------------------------------------
 function Invoke-Exe {
     param(
@@ -144,11 +135,11 @@ function Invoke-Exe {
     $exe = Find-Exe
     if (-not $exe) {
         Write-Bad 'RamOptimizerService.exe was not found.'
-        Write-Host "       Looked in: $script:Root , ..\dist , ..\release"
-        Write-Host '       Build it with build_exe.bat (or unzip the release package here).'
+        Write-Host "        looked in: $script:Root , ..\dist , ..\release"
+        Write-Host '        build it with build_exe.bat, or unzip the release package here.'
         return 9009
     }
-    Write-Host ('       > {0} {1}' -f (Split-Path -Leaf $exe), ($ExeArgs -join ' ')) -ForegroundColor DarkGray
+    Write-Host ('        > {0} {1}' -f (Split-Path -Leaf $exe), ($ExeArgs -join ' ')) -ForegroundColor DarkGray
     & $exe @ExeArgs 2>&1 | ForEach-Object { Write-Host $_ }
     $code = $LASTEXITCODE
     if ($code -ne 0 -and -not $AllowFail) { Write-Bad "Command failed (exit code $code)." }
@@ -163,31 +154,33 @@ function Get-ServiceState {
 # Actions
 # ---------------------------------------------------------------------------
 function Invoke-Install {
-    Write-Head 'Installing RAM Optimizer Service'
+    Write-Head 'Install'
     if (-not (Confirm-Admin 'install')) { return 2 }
     if (Invoke-Exe -ExeArgs @('service', 'install', '--wait', '25') -AllowFail) {
-        Write-Bad 'Installation failed - read the message above, then check the logs (menu 4).'
+        Write-Bad 'Installation failed - see the message above.'
+        Write-Note 'If the service is already installed, use "repair" or remove it first.'
         return 1
     }
     Invoke-Exe -ExeArgs @('config', '--init') -AllowFail | Out-Null
     $service = Get-ServiceState
     if ($service) {
-        Write-Ok "Service installed: state = $($service.Status), startup = $($service.StartType)"
+        Write-Ok "installed: state = $($service.Status), startup = $($service.StartType)"
     } else {
-        Write-Note 'The service is not visible yet - run status again in a few seconds.'
+        Write-Note 'not visible yet - run status again in a few seconds'
     }
-    Write-Ok "Configuration: $(Join-Path (Get-DataDir) 'config.ini')"
-    Write-Note 'It frees unused RAM once a minute, and immediately when RAM is critical.'
+    Write-KeyValue 'config file' (Join-Path (Get-DataDir) 'config.ini')
+    Write-KeyValue 'behaviour' 'release pass every 60 s; immediate at 92% used'
     return 0
 }
 
 function Invoke-Remove {
-    Write-Head 'Removing RAM Optimizer Service'
+    Write-Head 'Remove'
     if (-not (Confirm-Admin 'remove')) { return 2 }
     if (-not (Get-ServiceState)) {
-        Write-Note 'The service is not installed - nothing to remove.'
+        Write-Note 'the service is not installed - nothing to remove'
         if (Test-Path -LiteralPath (Get-DataDir)) {
-            Write-Note "Settings and logs are kept in $(Get-DataDir) (delete it for a clean uninstall)."
+            Write-KeyValue 'data kept in' (Get-DataDir)
+            Write-Note 'delete that folder for a completely clean uninstall'
         }
         return 2
     }
@@ -196,11 +189,11 @@ function Invoke-Remove {
         return 1
     }
     if (Get-ServiceState) {
-        Write-Bad 'The service is still registered - close services.msc, or reboot, then retry.'
+        Write-Bad 'the service is still registered - close services.msc or reboot, then retry'
         return 1
     }
-    Write-Ok 'Service removed.'
-    Write-Note "Settings and logs were kept in $(Get-DataDir)."
+    Write-Ok 'service removed'
+    Write-KeyValue 'data kept in' (Get-DataDir)
     return 0
 }
 
@@ -210,60 +203,94 @@ function Invoke-Status {
         Write-Bad 'RamOptimizerService.exe was not found - build it first (build_exe.bat).'
         return 1
     }
+
     $service = Get-ServiceState
     if ($service) {
-        Write-Ok "Service: installed, state = $($service.Status), startup = $($service.StartType)"
+        $startup = $service.StartType
+        Write-KeyValue 'service' "installed  ($($service.Status), $startup)" 'Green'
     } else {
-        Write-Note 'Service: not installed'
+        Write-KeyValue 'service' 'not installed' 'Yellow'
     }
 
     $statusFile = Join-Path (Get-DataDir) 'status.json'
-    if (Test-Path -LiteralPath $statusFile) {
-        try {
-            $data = Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8 | ConvertFrom-Json
-            Write-Host ''
-            Write-Host '  status.json (written by the service after every cycle):' -ForegroundColor DarkGray
-            Write-Host ($data | Format-List | Out-String -Width 110)
-            Write-Host "  Last written: $((Get-Item -LiteralPath $statusFile).LastWriteTime)" -ForegroundColor DarkGray
-            if ($null -ne $data.critical) {
-                if ($data.critical) { Write-Note 'critical = true: memory is above sustained_trigger_percent.' }
-                else { Write-Ok 'critical = false: memory is below the critical threshold.' }
-            }
-        } catch {
-            Write-Note "status.json could not be read: $($_.Exception.Message)"
-        }
-    } else {
-        Write-Note "No status.json yet ($statusFile) - the service has not run a cycle."
+    if (-not (Test-Path -LiteralPath $statusFile)) {
+        Write-KeyValue 'status.json' "not written yet ($statusFile)"
+        Write-Note 'the service writes it after every cycle'
+        return 0
     }
 
+    try {
+        $data = Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Write-Bad "status.json could not be parsed: $($_.Exception.Message)"
+        return 1
+    }
+
+    $memory = $data.memory
+    $counters = $data.counters
+    $age = (Get-Date) - (Get-Item -LiteralPath $statusFile).LastWriteTime
+
     Write-Host ''
-    Write-Host '  Live view from the exe:' -ForegroundColor DarkGray
-    Invoke-Exe -ExeArgs @('status') -AllowFail | Out-Null
+    Write-KeyValue 'state' ([string]$data.state)
+    Write-KeyValue 'last cycle' ("{0}  ({1:n0} s ago)" -f $data.last_cycle_at, $age.TotalSeconds)
+    Write-KeyValue 'last action' ([string]$data.last_action)
+    Write-KeyValue 'reason' ([string]$data.last_reason)
+    if ($memory) {
+        Write-KeyValue 'memory' ("{0}% used, {1:n0} MB free, commit {2}%" -f `
+            $memory.used_percent, $memory.available_mb, $memory.commit_percent)
+    }
+    if ($counters) {
+        Write-KeyValue 'totals' ("{0} passes, {1:n0} MB freed, {2} errors, {3} cycles" -f `
+            $counters.purges, $counters.freed_mb, $counters.errors, $counters.cycles)
+    }
+    $critical = $data.extra.critical
+    if ($null -ne $critical) {
+        if ($critical) {
+            Write-KeyValue 'critical' 'YES - a release pass runs immediately' 'Yellow'
+        } else {
+            Write-KeyValue 'critical' 'no - below the critical threshold' 'Green'
+        }
+    }
+    if ($data.recent_errors) {
+        Write-Host ''
+        Write-Note 'recent errors:'
+        $data.recent_errors | Select-Object -Last 5 | ForEach-Object {
+            Write-Host ("        {0}  {1}" -f $_.at, $_.message) -ForegroundColor Red
+        }
+    }
     return 0
 }
 
 function Invoke-Logs {
-    Write-Head "Logs (last $Lines lines)"
+    Write-Head "Logs (last $script:LogLines lines)"
     $log = Join-Path (Get-DataDir) 'ram_optimizer.log'
     $crash = Join-Path (Get-DataDir) 'crash.log'
+
     if (Test-Path -LiteralPath $log) {
         Write-Host "  $log  ($((Get-Item -LiteralPath $log).Length) bytes)" -ForegroundColor DarkGray
-        Get-Content -LiteralPath $log -Tail $Lines -Encoding UTF8 | ForEach-Object { Write-Host $_ }
-    } else {
-        Write-Note "No log file yet: $log"
-    }
-    if (Test-Path -LiteralPath $crash) {
         Write-Host ''
-        Write-Note "Crash log found: $crash"
-        Get-Content -LiteralPath $crash -Tail 40 -Encoding UTF8 | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+        Get-Content -LiteralPath $log -Tail $script:LogLines -Encoding UTF8 | ForEach-Object {
+            # Colour the lines that matter, keep everything readable.
+            if ($_ -match 'critical|IMMEDIATE') { Write-Host $_ -ForegroundColor Yellow }
+            elseif ($_ -match 'ERROR|crash') { Write-Host $_ -ForegroundColor Red }
+            else { Write-Host $_ }
+        }
     } else {
-        Write-Ok 'No crash.log - no early-startup crashes were recorded.'
+        Write-Note "no log yet: $log"
+    }
+
+    Write-Host ''
+    if (Test-Path -LiteralPath $crash) {
+        Write-Note "crash log: $crash"
+        Get-Content -LiteralPath $crash -Tail 30 -Encoding UTF8 | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+    } else {
+        Write-Ok 'no crash log - no startup crashes recorded'
     }
     Write-Host ''
-    Write-Host '  What to look for:' -ForegroundColor DarkGray
-    Write-Host '    "starting the optimization loop ... every 60"   normal one-minute cadence'
-    Write-Host '    "critical state ... acting immediately"          the critical path fired'
-    Write-Host '    "freed ... MB"                                   an actual release pass'
+    Write-Host '  what to look for:' -ForegroundColor DarkGray
+    Write-Host '    "optimization loop started ... every 60"   normal cadence'
+    Write-Host '    "critical"                                  immediate pass'
+    Write-Host '    "released ... MB"                           measured result'
     return 0
 }
 
@@ -271,44 +298,61 @@ function Invoke-Test {
     Write-Head 'Dry run (nothing on the system is changed)'
     if (-not (Confirm-Admin 'test')) { return 2 }
     if (Invoke-Exe -ExeArgs @('test', '--dry-run')) { return 1 }
-    Write-Ok 'Dry run finished - the JSON above is what a real pass would decide.'
+    Write-Ok 'dry run finished - the JSON above is what a real pass would decide'
     return 0
 }
 
 function Invoke-Config {
     Write-Head 'Configuration'
     $ini = Join-Path (Get-DataDir) 'config.ini'
-    if (-not (Test-Path -LiteralPath $ini)) { Invoke-Exe -ExeArgs @('config', '--init') -AllowFail | Out-Null }
-    if (Test-Path -LiteralPath $ini) {
-        Write-Ok "Config file: $ini"
-        Write-Host '  Keys that control the behaviour:' -ForegroundColor DarkGray
-        Select-String -LiteralPath $ini -Pattern 'check_interval_seconds|trigger_percent|reset_percent|sustained_trigger_percent|sustained_polls|critical_poll_seconds' |
-            ForEach-Object { Write-Host ('    ' + $_.Line.Trim()) }
-        Write-Host ''
-        Write-Host '  After editing, apply it to the running service: menu 10 (reload).' -ForegroundColor DarkGray
-        if (-not $NoPause) {
-            $answer = Read-Host '  Open it in Notepad now? [y/N]'
-            if ($answer -match '^[Yy]') { Start-Process notepad.exe -ArgumentList $ini -Wait | Out-Null }
-        }
-    } else {
+    if (-not (Test-Path -LiteralPath $ini)) {
+        Invoke-Exe -ExeArgs @('config', '--init') -AllowFail | Out-Null
+    }
+    if (-not (Test-Path -LiteralPath $ini)) {
         Write-Bad 'config.ini could not be created.'
         return 1
+    }
+    Write-KeyValue 'file' $ini
+    Write-Host ''
+    Write-Host '  keys that control the behaviour:' -ForegroundColor DarkGray
+    Select-String -LiteralPath $ini -Pattern 'check_interval_seconds|critical_poll_seconds|critical_probe_seconds|trigger_percent|reset_percent|sustained_trigger_percent|sustained_polls' |
+        ForEach-Object { Write-Host ('    ' + $_.Line.Trim()) }
+    Write-Host ''
+    Write-Note 'after editing, apply it with menu option 10 (reload) - no restart needed'
+    if (-not $NoPause) {
+        $answer = Read-Host '  open it in Notepad now? [y/N]'
+        if ($answer -match '^[Yy]') { Start-Process notepad.exe -ArgumentList $ini -Wait | Out-Null }
     }
     Invoke-Exe -ExeArgs @('config', '--validate') -AllowFail | Out-Null
     return 0
 }
 
+function Invoke-Verify {
+    Write-Head 'Behaviour check: every minute, and immediate when critical'
+    if (Invoke-Exe -ExeArgs @('verify', '--simulate-critical') -AllowFail) { return 1 }
+    Write-Ok 'cadence and critical path verified (read-only)'
+    Write-Note 'for evidence from a running service, see option 4 (logs)'
+    return 0
+}
+
 function Invoke-Doctor {
     Write-Head 'Diagnostics'
-    Write-Host "  Windows      : $([System.Environment]::OSVersion.VersionString)"
-    Write-Host "  PowerShell   : $($PSVersionTable.PSVersion)"
-    Write-Host "  64-bit OS    : $([System.Environment]::Is64BitOperatingSystem)"
-    Write-Host "  Elevated     : $(Test-Admin)"
-    Write-Host "  Data folder  : $(Get-DataDir)"
-    Write-Note 'The service must run as LocalSystem to trim other processes working sets.'
+    Write-KeyValue 'windows' ([System.Environment]::OSVersion.VersionString)
+    Write-KeyValue 'powershell' ([string]$PSVersionTable.PSVersion)
+    Write-KeyValue '64-bit OS' ([string][System.Environment]::Is64BitOperatingSystem)
+    Write-KeyValue 'elevated' ([string](Test-Admin))
+    Write-KeyValue 'data folder' (Get-DataDir)
+
     $exe = Find-Exe
-    if ($exe) { Write-Ok "Exe: $exe" } else { Write-Bad 'Exe not found.' }
-    if (Get-ServiceState) { Write-Ok "Service: $((Get-ServiceState).Status)" } else { Write-Note 'Service: not installed' }
+    if ($exe) { Write-KeyValue 'exe' $exe 'Green' } else { Write-Bad 'RamOptimizerService.exe not found.' }
+
+    $service = Get-ServiceState
+    if ($service) {
+        Write-KeyValue 'service' "$($service.Status) / $($service.StartType)" 'Green'
+    } else {
+        Write-KeyValue 'service' 'not installed' 'Yellow'
+    }
+
     if ($exe) {
         Write-Host ''
         Invoke-Exe -ExeArgs @('version') -AllowFail | Out-Null
@@ -319,40 +363,31 @@ function Invoke-Doctor {
     return 0
 }
 
-# One-liner actions: elevate, run, report.
-function Invoke-Verb([string]$Action, [string]$Head, [string[]]$ExeArgs) {
-    Write-Head $Head
+# One-liner action: elevate, run, report.
+function Invoke-Verb([string]$Action, [string]$Title, [string[]]$ExeArgs) {
+    Write-Head $Title
     if (-not (Confirm-Admin $Action)) { return 2 }
     if (Invoke-Exe -ExeArgs $ExeArgs) { return 1 }
-    Write-Ok 'Done.'
+    Write-Ok 'done'
     return 0
 }
 
-function Invoke-Verify {
-    Write-Head 'Scenario check: every minute, and immediately when critical'
-    if (Invoke-Exe -ExeArgs @('verify', '--simulate-critical') -AllowFail) { return 1 }
-    Write-Ok 'The service trims on a 60 s cycle and reacts to critical memory at once.'
-    Write-Host '  For real evidence, leave the service running and select 4 (logs);' -ForegroundColor DarkGray
-    Write-Host '  the loop logs both the 60 s cycle and the immediate critical pass.' -ForegroundColor DarkGray
-    return 0
-}
-
-function Invoke-Named([string]$Action) {
-    switch ($Action) {
+function Invoke-Named([string]$Name) {
+    switch ($Name) {
         'install' { return (Invoke-Install) }
         'remove' { return (Invoke-Remove) }
         'status' { return (Invoke-Status) }
         'logs' { return (Invoke-Logs) }
         'test' { return (Invoke-Test) }
         'config' { return (Invoke-Config) }
-        'doctor' { return (Invoke-Doctor) }
-        'start' { return (Invoke-Verb 'start' 'Starting the service' @('service', 'start', '--wait', '20')) }
-        'stop' { return (Invoke-Verb 'stop' 'Stopping the service' @('service', 'stop', '--wait', '15')) }
-        'restart' { return (Invoke-Verb 'restart' 'Restarting the service' @('service', 'restart', '--wait', '20')) }
-        'reload' { return (Invoke-Verb 'reload' 'Reloading config.ini' @('reload')) }
-        'pause' { return (Invoke-Verb 'pause' 'Pausing trimming' @('pause')) }
-        'resume' { return (Invoke-Verb 'resume' 'Resuming trimming' @('resume')) }
         'verify' { return (Invoke-Verify) }
+        'doctor' { return (Invoke-Doctor) }
+        'start' { return (Invoke-Verb 'start' 'Start' @('service', 'start', '--wait', '20')) }
+        'stop' { return (Invoke-Verb 'stop' 'Stop' @('service', 'stop', '--wait', '15')) }
+        'restart' { return (Invoke-Verb 'restart' 'Restart' @('service', 'restart', '--wait', '20')) }
+        'reload' { return (Invoke-Verb 'reload' 'Reload configuration' @('reload')) }
+        'pause' { return (Invoke-Verb 'pause' 'Pause trimming' @('pause')) }
+        'resume' { return (Invoke-Verb 'resume' 'Resume trimming' @('resume')) }
         default { return 2 }
     }
 }
@@ -360,32 +395,60 @@ function Invoke-Named([string]$Action) {
 # ---------------------------------------------------------------------------
 # Menu
 # ---------------------------------------------------------------------------
-function Show-Menu {
+function Show-Header {
     $exe = Find-Exe
     $service = Get-ServiceState
-    Write-Host ('=' * 68) -ForegroundColor DarkCyan
-    Write-Host '   RAM Optimizer Service - Control Panel' -ForegroundColor Cyan
-    Write-Host '   `u{067E}`u{0646}`u{0644} `u{0645}`u{062F}`u{06CC}`u{0631}`u{06CC}`u{062A} `u{0633}`u{0631}`u{0648}`u{06CC}`u{0633} `u{0628}`u{0647}`u{06CC}`u{0646}`u{0647}`u{200C}`u{0633}`u{0627}`u{0632} `u{062D}`u{0627}`u{0641}`u{0638}`u{0647}' -ForegroundColor Cyan
-    Write-Host ('=' * 68) -ForegroundColor DarkCyan
-    if ($exe) { Write-Host "  exe    : $exe" -ForegroundColor DarkGray }
-    else { Write-Host '  exe    : NOT FOUND - run build_exe.bat first' -ForegroundColor Red }
-    if ($service) { Write-Host "  service: $($service.Status) / $($service.StartType)" -ForegroundColor DarkGray }
-    else { Write-Host '  service: not installed' -ForegroundColor DarkGray }
+
     Write-Host ''
-    Write-Host '   1  Install the service              `u{0646}`u{0635}`u{0628}'
-    Write-Host '   2  Remove the service               `u{062D}`u{0630}`u{0641}'
-    Write-Host '   3  Status                           `u{0648}`u{0636}`u{0639}`u{06CC}`u{062A}'
-    Write-Host '   4  Logs                             `u{0644}`u{0627}`u{06AF}`u{200C}`u{0647}`u{0627}'
-    Write-Host '   5  Start                            `u{0627}`u{062C}`u{0631}`u{0627}'
-    Write-Host '   6  Stop                             `u{062A}`u{0648}`u{0642}`u{0641}'
-    Write-Host '   7  Restart                          `u{0631}`u{06CC}`u{200C}`u{0627}`u{0633}`u{062A}`u{0627}`u{0631}`u{062A}'
-    Write-Host '   8  Dry run (no changes)             `u{0622}`u{0632}`u{0645}`u{0648}`u{0646} `u{0628}`u{06CC}`u{200C}`u{062E}`u{0637}`u{0631}'
-    Write-Host '   9  Config file (open / validate)    `u{067E}`u{06CC}`u{06A9}`u{0631}`u{0628}`u{0646}`u{062F}`u{06CC}'
-    Write-Host '  10  Reload config in the service     `u{0628}`u{0627}`u{0632}`u{062E}`u{0648}`u{0627}`u{0646}`u{06CC} `u{067E}`u{06CC}`u{06A9}`u{0631}`u{0628}`u{0646}`u{062F}`u{06CC}'
-    Write-Host '  11  Pause / resume trimming          `u{062A}`u{0648}`u{0642}`u{0641}/`u{0627}`u{062F}`u{0627}`u{0645}`u{0647}`u{200C}`u{06CC} `u{067E}`u{0627}`u{06A9}`u{200C}`u{0633}`u{0627}`u{0632}`u{06CC}'
-    Write-Host '  12  Diagnostics                      `u{0639}`u{06CC}`u{0628}`u{200C}`u{06CC}`u{0627}`u{0628}`u{06CC}'
-    Write-Host '  13  Verify 1-minute / critical mode  `u{0628}`u{0631}`u{0631}`u{0633}`u{06CC} `u{0633}`u{0646}`u{0627}`u{0631}`u{06CC}`u{0648}'
-    Write-Host '   0  Exit                             `u{062E}`u{0631}`u{0648}`u{062C}'
+    Write-Host ('=' * $script:UiWidth) -ForegroundColor DarkCyan
+    Write-Host '  RAM Optimizer Service  -  Control Panel' -ForegroundColor Cyan
+    Write-Host ('=' * $script:UiWidth) -ForegroundColor DarkCyan
+
+    if ($exe) {
+        Write-KeyValue 'exe' (Split-Path -Leaf (Split-Path -Parent $exe)) 'DarkGray'
+        Write-KeyValue 'path' $exe 'DarkGray'
+    } else {
+        Write-KeyValue 'exe' 'NOT FOUND - run build_exe.bat' 'Red'
+    }
+    if ($service) {
+        Write-KeyValue 'service' "$($service.Status)  ($($service.StartType))" 'Green'
+    } else {
+        Write-KeyValue 'service' 'not installed' 'Yellow'
+    }
+
+    # Compact one-line summary of the last cycle, if there is one.
+    $statusFile = Join-Path (Get-DataDir) 'status.json'
+    if (Test-Path -LiteralPath $statusFile) {
+        try {
+            $data = Get-Content -LiteralPath $statusFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            $memory = $data.memory
+            $usage = if ($memory) { $memory.used_percent } else { '?' }
+            $criticalText = 'normal'
+            if ($null -ne $data.extra.critical -and $data.extra.critical) { $criticalText = 'CRITICAL' }
+            Write-KeyValue 'last cycle' ("{0}% used, {1}" -f $usage, $criticalText)
+        } catch { }
+    }
+}
+
+function Show-Menu {
+    Show-Header
+    Write-Host ''
+    Write-Host '  SERVICE' -ForegroundColor DarkGray
+    Write-Host '    1  Install'
+    Write-Host '    2  Remove'
+    Write-Host '    3  Status'
+    Write-Host '    4  Logs'
+    Write-Host ''
+    Write-Host '  CONTROL' -ForegroundColor DarkGray
+    Write-Host '    5  Start                         6  Stop'
+    Write-Host '    7  Restart                      10  Reload configuration'
+    Write-Host '   11  Pause / resume trimming'
+    Write-Host ''
+    Write-Host '  INSPECT' -ForegroundColor DarkGray
+    Write-Host '    8  Dry run (no changes)           9  Configuration'
+    Write-Host '   12  Diagnostics                   13  Behaviour check'
+    Write-Host ''
+    Write-Host '    0  Exit' -ForegroundColor DarkGray
     Write-Host ''
 }
 
@@ -393,13 +456,13 @@ function Invoke-MenuAction([string]$Choice) {
     switch ($Choice) {
         '1' { Invoke-Named 'install' | Out-Null }
         '2' {
-            $answer = Read-Host '  Remove the service? Settings and logs stay. [y/N]'
-            if ($answer -match '^[Yy]') { Invoke-Named 'remove' | Out-Null } else { Write-Note 'Cancelled.' }
+            $answer = Read-Host '  Remove the service? Settings and logs are kept. [y/N]'
+            if ($answer -match '^[Yy]') { Invoke-Named 'remove' | Out-Null } else { Write-Note 'cancelled' }
         }
         '3' { Invoke-Named 'status' | Out-Null }
         '4' {
-            $raw = Read-Host "  How many lines? [Enter = $Lines]"
-            if ($raw -match '^\d+$') { $script:Lines = [int]$raw }
+            $raw = Read-Host "  How many lines? [Enter = $script:LogLines]"
+            if ($raw -match '^\d+$') { $script:LogLines = [int]$raw }
             Invoke-Logs | Out-Null
         }
         '5' { Invoke-Named 'start' | Out-Null }
@@ -407,22 +470,19 @@ function Invoke-MenuAction([string]$Choice) {
         '7' { Invoke-Named 'restart' | Out-Null }
         '8' { Invoke-Named 'test' | Out-Null }
         '9' { Invoke-Named 'config' | Out-Null }
-        '10' {
-            Write-Note 'The service re-reads config.ini and applies it without a restart.'
-            Invoke-Named 'reload' | Out-Null
-        }
+        '10' { Invoke-Named 'reload' | Out-Null }
         '11' {
             Write-Host ''
-            Write-Host '   p = pause trimming (the service keeps running and reporting)'
-            Write-Host '   r = resume trimming'
-            $answer = Read-Host '   Choice [p/r]'
+            Write-Host '    p = pause trimming (the service keeps running and reporting)'
+            Write-Host '    r = resume trimming'
+            $answer = Read-Host '    choice [p/r]'
             if ($answer -match '^[Pp]') { Invoke-Named 'pause' | Out-Null }
             elseif ($answer -match '^[Rr]') { Invoke-Named 'resume' | Out-Null }
-            else { Write-Note 'Cancelled.' }
+            else { Write-Note 'cancelled' }
         }
         '12' { Invoke-Named 'doctor' | Out-Null }
         '13' { Invoke-Named 'verify' | Out-Null }
-        default { Write-Note "Unknown option: $Choice" }
+        default { Write-Note "unknown option: $Choice" }
     }
 }
 
@@ -446,9 +506,7 @@ while ($true) {
     } catch {
         Write-Bad $_.Exception.Message
     }
-    if (-not $NoPause) {
-        Write-Host ''
-        Read-Host '  Press Enter to return to the menu' | Out-Null
-    }
+    Write-Host ''
+    Read-Host '  Press Enter to return to the menu' | Out-Null
 }
 exit 0

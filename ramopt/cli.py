@@ -391,11 +391,12 @@ def cmd_reload(_args) -> int:
 
 
 def cmd_verify(args) -> int:
-    """بررسی عملی سناریو: هر یک دقیقه + واکنش فوری در وضعیت بحرانی.
+    """Read-only proof of the requested behaviour.
 
-    فقط اندازه‌گیری می‌کند؛ هیچ trim/purge ای انجام نمی‌شود (برای همین
-    ``--dry-run`` اجباری است). با ``--simulate-critical`` آستانه‌ی بحرانی
-    موقتاً پایین می‌آید تا روی ماشین سالم هم مسیر فوری دیده شود.
+    Prints the effective cadence (60 s normal, immediate at the critical
+    threshold, 5 s while critical) and, with ``--simulate-critical``, shows the
+    decision the engine takes when memory is critical. Nothing is trimmed or
+    purged, so it is safe to run on a production machine.
     """
     import time
 
@@ -405,22 +406,24 @@ def cmd_verify(args) -> int:
 
     config, issues = load_config(getattr(args, "config", None) or None)
     for issue in issues:
-        _print(f"⚠ [{issue.section}] {issue.key}: {issue.message}")
+        _print(f"[!] [{issue.section}] {issue.key}: {issue.message}")
 
     interval = config.check_interval_seconds
     critical_poll = config.critical_poll_seconds
+    probe = config.critical_probe_seconds
     threshold = config.sustained_trigger_percent
 
-    _print("سناریوی درخواستی")
-    _print(f"  ۱) آزادسازی خودکار هر {interval} ثانیه در حالت عادی")
-    _print(f"  ۲) به‌محض رسیدن مصرف به {threshold}% → همان لحظه (بدون انتظار)")
-    _print(f"     حتی وسط خواب یک‌دقیقه‌ای: پایش سبک هر {config.critical_probe_seconds} ثانیه")
-    _print(f"     و بعد از آن بررسی هر {critical_poll} ثانیه تا پایین آمدن")
+    _print("Requested behaviour")
+    _print(f"  1) normal:       release pass every {interval} s")
+    _print(f"  2) critical:     at {threshold}% used -> act in that same cycle")
+    _print(f"     mid-wait:     lightweight probe every {probe} s, so a spike")
+    _print("                   between cycles is not missed")
+    _print(f"     while high:   re-check every {critical_poll} s until it drops")
     _print("")
-    _print("پیکربندی مؤثر")
+    _print("Effective configuration")
     _print(f"  check_interval_seconds    = {interval}")
     _print(f"  critical_poll_seconds     = {critical_poll}")
-    _print(f"  critical_probe_seconds    = {config.critical_probe_seconds}")
+    _print(f"  critical_probe_seconds    = {probe}")
     _print(f"  trigger_percent           = {config.trigger_percent}")
     _print(f"  sustained_trigger_percent = {threshold}")
     _print(f"  sustained_polls           = {config.sustained_polls}")
@@ -429,34 +432,36 @@ def cmd_verify(args) -> int:
 
     reading = memory_mod.measure(_api_for_verify())
     if reading.snapshot is None:
-        _print("خطا: خواندن وضعیت حافظه ممکن نیست.")
+        _print("ERROR: cannot read memory state on this machine.")
         return EXIT_ERROR
 
     used = reading.used_percent
     total_mb = reading.snapshot.total_bytes / (1024 * 1024)
-    pending = "?" if reading.standby_mb is None else f"{reading.standby_mb:.0f}"
-    _print("وضعیت فعلی حافظه")
-    _print(f"  مصرف              : {used:.1f}%")
-    _print(f"  آزاد              : {reading.available_mb:.0f}MB از {total_mb:.0f}MB")
-    _print(f"  Standby (قابل آزادسازی): {pending}MB")
+    standby = "n/a" if reading.standby_mb is None else f"{reading.standby_mb:.0f}"
+    _print("Current memory")
+    _print(f"  used            : {used:.1f}%")
+    _print(f"  available       : {reading.available_mb:.0f} MB of {total_mb:.0f} MB")
+    _print(f"  standby (cache) : {standby} MB")
     _print("")
 
     over_normal = used >= config.trigger_percent
     over_critical = used >= threshold
-    _print("نتیجه‌ی ارزیابی")
-    _print(f"  آستانه‌ی عادی ({config.trigger_percent}%) رد شده؟ {'بله' if over_normal else 'خیر'}")
+    _print("Assessment")
+    _print(
+        f"  over trigger_percent ({config.trigger_percent}%)      : "
+        f"{'yes' if over_normal else 'no'}"
+    )
     if over_critical:
-        _print(f"  آستانه‌ی بحرانی ({threshold}%) رد شده → چرخه‌ی بعد فوراً اجرا می‌شود.")
-        _print(f"  فاصله‌ی بررسی بعدی: {critical_poll} ثانیه.")
+        _print(f"  over critical threshold ({threshold}%)  : yes -> next cycle acts at once")
+        _print(f"  next poll in    : {critical_poll} s")
     else:
-        _print(f"  بحرانی نیست → فاصله‌ی بررسی بعدی: {interval} ثانیه.")
-        _print(
-            f"  اگر مصرف به {threshold}% برسد، بدون انتظار برای این {interval} ثانیه اجرا می‌شود."
-        )
+        _print(f"  over critical threshold ({threshold}%)  : no")
+        _print(f"  next poll in    : {interval} s")
+        _print(f"  if usage reaches {threshold}%, the loop does not wait those {interval} s")
 
     if args.simulate_critical:
         _print("")
-        _print("شبیه‌سازی مسیر بحرانی (بدون تغییر سیستم: هیچ trim/purge ای اجرا نمی‌شود)")
+        _print("Critical path (simulated, nothing on the system is changed)")
         from ramopt.engine import Action as _Action
         from ramopt.engine import OptimizerEngine
 
@@ -464,22 +469,24 @@ def cmd_verify(args) -> int:
         engine = OptimizerEngine(simulated, _api_for_verify())
         decision = engine.decide(reading)
         if not decision.critical:
-            _print(f"  ⚠ مسیر بحرانی فعال نشد: {decision.reason}")
-            _print("    (مانع محیطی مثل pause / تمام‌صفحه / باتری یا نبود آستانه)")
+            _print(f"  [x] critical path did not fire: {decision.reason}")
+            _print("      (blocked by pause / fullscreen / battery / threshold disabled)")
             return EXIT_ERROR
-        _print(f"  مصرف فرضی بالای آستانه → تصمیم: {decision.action.value} (فوری)")
-        _print("  ترتیب زمانی که سرویس اجرا می‌کند:")
-        _print(f"    T+0s    خواندن حافظه → عبور از {threshold}% → همان لحظه پاس آزادسازی")
-        _print("    T+0s    تصمیم با critical=True (cooldown و سقف ساعتی دور زده می‌شوند)")
-        _print(f"    T+{critical_poll}s    بررسی بعدی (نه {interval}s)")
-        _print(f"    T+{2 * critical_poll}s    بررسی بعدی … تا وقتی مصرف زیر {threshold}% بیاید")
-        _print(f"    سپس    بازگشت به فاصله‌ی عادی {interval}s")
+        _print(f"  usage above threshold -> decision: {decision.action.value} (immediate)")
+        _print("  timeline the service follows:")
+        _print("    T+0s        read memory, threshold crossed -> release pass now")
+        _print("    T+0s        decision carries critical=True (cooldown and hourly cap skipped)")
+        _print(f"    T+{critical_poll}s        poll again (not {interval}s)")
+        _print(
+            f"    T+{2 * critical_poll}s        poll again ... until usage drops below {threshold}%"
+        )
+        _print(f"    then        back to the normal {interval}s cadence")
         assert decision.action is _Action.OPTIMIZED
 
     if args.watch > 0:
         _print("")
-        _print(f"پایش {args.watch} ثانیه‌ای: هر تغییر وضعیت بحرانی گزارش می‌شود.")
-        _print(f"  (سرویس واقعی هر {interval} ثانیه یک بار تصمیم می‌گیرد)")
+        _print(f"Live watch for {args.watch} s (state changes only)")
+        _print(f"  (the installed service decides once every {interval} s)")
         last = None
         deadline = time.monotonic() + args.watch
         while time.monotonic() < deadline:
@@ -488,14 +495,14 @@ def cmd_verify(args) -> int:
                 state = current.used_percent >= threshold
                 if state != last:
                     stamp = time.strftime("%H:%M:%S")
-                    label = "بحرانی" if state else "عادی"
-                    _print(f"  [{stamp}] {current.used_percent:5.1f}% → {label}")
+                    label = "CRITICAL" if state else "normal"
+                    _print(f"  [{stamp}] {current.used_percent:5.1f}% -> {label}")
                     last = state
             time.sleep(min(2.0, max(0.5, critical_poll)))
 
     _print("")
-    _print(f"لاگ‌ها: {paths.log_file()}")
-    _print("برای دیدن رفتار واقعی: ramopt log --lines 50  یا  build\\Manage-RamOptimizer.bat logs")
+    _print(f"Log file: {paths.log_file()}")
+    _print("Real evidence: run the service, then 'RamOptimizerService.exe log --lines 50'")
     return EXIT_OK
 
 

@@ -142,9 +142,25 @@ jobs:
             if ($bytes -contains 13 -eq $false) { throw "$bat has no CRLF line endings" }
             if (($bytes | Where-Object { $_ -gt 127 }).Count -gt 0) { throw "$bat contains non-ASCII bytes" }
           }
-          $help = & powershell -NoProfile -ExecutionPolicy Bypass -File build\RamOptimizerControl.ps1 -Action doctor
-          if ($LASTEXITCODE -ne 0) { throw "control panel doctor failed" }
           if (-not (Test-Path build\Manage-RamOptimizer.bat)) { throw "Manage-RamOptimizer.bat is missing" }
+
+          # Every read-only action must run and print proper English text.
+          # (Regression: a PS7-only escape made the menu print `u{067E}`...)
+          $panel = 'build\RamOptimizerControl.ps1'
+          foreach ($action in @('status', 'logs', 'config', 'doctor', 'verify')) {
+            $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $panel -Action $action 2>&1 | Out-String
+            Write-Output "--- $action ---"
+            Write-Output $out
+            if ($out -match '`u\{') { throw "$action printed raw escape sequences" }
+            if ($out -match 'u\{[0-9A-Fa-f]{4}\}') { throw "$action printed raw escape sequences" }
+          }
+
+          # And the interactive menu itself: option 3 (status), then 0 (exit).
+          $menu = "3`n`n0`n" | & powershell -NoProfile -ExecutionPolicy Bypass -File $panel 2>&1 | Out-String
+          Write-Output $menu
+          if ($menu -notmatch 'RAM Optimizer Service') { throw "the menu did not render" }
+          if ($menu -notmatch 'Install') { throw "the menu has no Install entry" }
+          if ($menu -match 'u\{[0-9A-Fa-f]{4}\}') { throw "the menu printed raw escape sequences" }
 
       - name: Smoke test the built exe
         shell: pwsh

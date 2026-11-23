@@ -87,21 +87,21 @@ def test_exe_output_is_not_committed_but_the_panel_is() -> None:
     assert _git_check_ignore("build/RamOptimizerControl.ps1").returncode == 1
 
 
-def test_panel_script_is_utf8_bom_and_ascii() -> None:
-    """پنل باید BOM داشته باشد و بدنه‌اش ASCII باشد.
+def test_panel_script_is_pure_ascii_and_english() -> None:
+    """پنل باید ASCII خالص و انگلیسی باشد و به سینتکس مخصوص نسخه‌ها تکیه نکند.
 
-    Windows PowerShell 5.1 فایل بدون BOM را با code page سیستم (مثلاً
-    windows-1256) می‌خواند و متن فارسی در رشته‌ها خراب می‌شد. با BOM همیشه
-    UTF-8 خوانده می‌شود؛ و escapeهای ```u{...}`` متن فارسی را از منبع ASCII
-    می‌سازند تا هیچ‌جای زنجیره‌ی بیلد به code page وابسته نباشد.
+    باگ واقعی: متن فارسی با escapeهای ```u{...}`` نوشته شده بود؛ آن سینتکس فقط
+    در PowerShell 6+ وجود دارد و Windows PowerShell 5.1 آن را **عیناً چاپ
+    می‌کند** (بدون هیچ خطایی، چون چیزی throw نمی‌شود). کاربر دقیقاً همین را دید.
     """
     data = PANEL.read_bytes()
-    assert data[:3] == b"\xef\xbb\xbf", "RamOptimizerControl.ps1 must start with a UTF-8 BOM"
-    body = data[3:].decode("utf-8")
-    # خط‌پایان مهم نیست (PowerShell هم LF و هم CRLF را می‌خواند)؛ BOM مهم است.
-    non_ascii = [line for line in body.splitlines() if any(ord(char) > 127 for char in line)]
-    assert non_ascii == [], f"keep the panel ASCII (Persian via `u{{...}}): {non_ascii[:2]}"
-    assert "`u{" in body, "Persian strings should use escape sequences"
+    assert all(byte < 128 for byte in data), "the panel must be pure ASCII"
+    body = data.decode("ascii")
+    assert "`u{" not in body, "PS7-only escape syntax must not be used"
+    # هیچ حرف فارسی/عربی داخل فایل نباشد (فقط انگلیسی)
+    assert not any("\u0600" <= chr(c) <= "\u06ff" for c in data), "English only"
+    # و هیچ متن چاپ‌شدنی فارسی هم نمانده باشد
+    assert "Select" in body and "Install" in body
 
 
 def test_bat_launches_the_powershell_panel() -> None:
@@ -278,3 +278,63 @@ def test_tool_scripts_survive_a_non_utf8_console(monkeypatch, capsys) -> None:
     for tool in ("make_version_info.py", "make_build_info.py"):
         source = (ROOT / "tools" / tool).read_text(encoding="utf-8")
         assert "_console" in source and "force_utf8_console" in source
+
+
+def test_panel_is_structurally_sound_and_51_compatible() -> None:
+    """بازرسی ایستا: بدون PowerShell هم می‌توان خطاهای واضح را گرفت.
+
+    * پرانتز/آکولاد متوازن؛
+    * هر تابعی که صدا زده می‌شود تعریف شده باشد؛
+    * ``ValidateSet`` با ``Invoke-Named`` هم‌خوان باشد (کاربر می‌تواند همان
+      نام را روی خط فرمان بدهد)؛
+    * هیچ سینتکس PowerShell 7-only استفاده نشده باشد (``??``، ``?.``،
+      escapeهای ``u{...}``، ``-Parallel``) — چون Windows 10/11 با 5.1 عرضه
+      می‌شود.
+    """
+    import re
+
+    body = PANEL.read_text(encoding="ascii")
+
+    # 1) توازن آکولاد و پرانتز بیرون از رشته‌ها/کامنت‌ها (تقریب کافی)
+    code_lines = [line for line in body.splitlines() if not line.lstrip().startswith("#")]
+    code = "\n".join(code_lines)
+    assert code.count("{") == code.count("}"), "unbalanced braces"
+    assert code.count("(") == code.count(")"), "unbalanced parentheses"
+    assert body.count("<#") == body.count("#>"), "unbalanced comment blocks"
+
+    # 2) توابع تعریف‌شده در برابر توابع صدا زده‌شده
+    defined = set(re.findall(r"^function ([A-Za-z-]+)", code, re.M))
+    called = set(
+        re.findall(r"\b((?:Invoke|Write|Get|Find|Test|Show|Confirm|Format|Split)-[A-Za-z]+)", code)
+    )
+    # cmdletهای استاندارد PowerShell (خارج از فایل تعریف می‌شوند)
+    builtin = {
+        "Get-Service",
+        "Get-Content",
+        "Get-Date",
+        "Get-Item",
+        "Get-Command",
+        "Write-Host",
+        "Split-Path",
+        "Test-Path",
+        "Join-Path",
+    }
+    missing = called - defined - builtin
+    assert not missing, f"undefined helpers: {sorted(missing)}"
+
+    # 3) ValidateSet <-> Invoke-Named
+    validate = re.search(r"ValidateSet\((.*?)\)\]", code, re.S)
+    assert validate
+    actions = set(re.findall(r"'([a-z]+)'", validate.group(1)))
+    switch_cases = set(re.findall(r"^\s*'([a-z]+)' \{", code, re.M))
+    # 'menu' در entry point عهده‌دار است، نه Invoke-Named
+    assert actions - {"menu"} == switch_cases, (
+        f"ValidateSet and Invoke-Named disagree: {actions - {'menu'} ^ switch_cases}"
+    )
+
+    # 4) سازگاری با Windows PowerShell 5.1
+    assert "`u{" not in body
+    assert "?? " not in code and "??)" not in code
+    assert not re.search(r"\$\w+\?\.", code), "null-conditional operator is PS7-only"
+    assert "-Parallel" not in code
+    assert "ForEach-Object -Parallel" not in code

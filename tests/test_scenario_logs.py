@@ -166,8 +166,9 @@ def test_verify_command_reports_the_interval_and_critical_path(capsys, monkeypat
     code = cli.main(["verify", "--simulate-critical"])
     assert code == 0
     out = capsys.readouterr().out
-    assert "هر 60 ثانیه" in out
+    # خروجی انگلیسی است (پنل و ابزار خط فرمان برای بین‌المللی بودن انگلیسی‌اند)
+    assert "every 60 s" in out
     assert "92%" in out
     assert "T+0s" in out
     assert "critical=True" in out
-    assert "5s" in out
+    assert "T+5s" in out

@@ -83,7 +83,8 @@ build\
   RamOptimizerService\       خروجی PyInstaller (exe + فایل‌های همراه)
 ```
 
-منوی `Manage-RamOptimizer.bat`:
+منوی `Manage-RamOptimizer.bat` (رابط کاربری **انگلیسی** است تا در هر ویندوزی
+از جمله Windows PowerShell 5.1 بدون مشکل code page کار کند):
 
 | گزینه | کار |
 |---|---|
