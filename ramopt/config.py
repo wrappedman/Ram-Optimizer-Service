@@ -45,6 +45,7 @@ import dataclasses
 import fnmatch
 import logging
 import os
+import unicodedata
 from dataclasses import dataclass
 
 logger = logging.getLogger("RamOptimizer")
@@ -114,6 +115,14 @@ class Config:
     #: حداقل حافظه‌ی آزاد مطلق؛ اگر حتی در حالت پرفشار هم این مقدار آزاد
     #: باشد، پاک‌سازی لازم نیست. (۰ = غیرفعال)
     min_available_mb: int = 0
+    #: «نقطه‌ی بحرانی» — بالاتر از این درصد، بدون انتظار برای فاصله‌ی بررسی
+    #: عادی (هر ۵ ثانیه چک می‌شود) پاک‌سازی اجرا می‌شود. (۰ = غیرفعال)
+    sustained_trigger_percent: int = 92
+    #: چند بررسی متوالی بالای آستانه‌ی بحرانی لازم است (فیلتر جهش‌های لحظه‌ای).
+    #: پیش‌فرض ۱: اولین باری که وضعیت بحرانی دیده شد، فوراً اقدام می‌شود.
+    sustained_polls: int = 1
+    #: فاصله‌ی بررسی هنگام بحرانی بودن وضعیت (ثانیه)
+    critical_poll_seconds: int = 5
 
     # --- standby ---
     purge_standby_list: bool = True
@@ -168,6 +177,19 @@ class ValidationIssue:
     message: str
 
 
+_PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def normalize_number_text(raw: str) -> str:
+    """تبدیل ارقام فارسی/عربی و ارقام غیرASCII به ASCII.
+
+    کاربر فارسی‌زبان طبیعی است که ``trigger_percent = ۸۰`` بنویسد؛ قبلاً این
+    مقدار «عدد نامعتبر» تلقی می‌شد و با ارزش پیش‌فرض جایگزین می‌شد.
+    """
+    text = unicodedata.normalize("NFKC", str(raw)).translate(_PERSIAN_DIGITS)
+    return text.strip()
+
+
 def _get_int(
     parser: configparser.ConfigParser,
     section: str,
@@ -181,7 +203,7 @@ def _get_int(
         return default
     raw = parser.get(section, key, fallback="")
     try:
-        value = int(float(raw.strip()))
+        value = int(float(normalize_number_text(raw)))
     except (TypeError, ValueError):
         issues.append(
             ValidationIssue(section, key, raw, "عدد صحیح نامعتبر — مقدار پیش‌فرض استفاده شد")
@@ -412,7 +434,9 @@ def load_config(path: str | None = None) -> tuple[Config, list[ValidationIssue]]
     if not os.path.isfile(config_path):
         return Config(), issues
 
-    parser = configparser.ConfigParser(interpolation=None)
+    # ``;`` و ``#`` بعد از مقدار، کامنت درون‌خطی هستند (مستندات README از همین
+    # قالب استفاده می‌کند؛ قبلاً «75   ; آستانه» به‌عنوان عدد نامعتبر رد می‌شد).
+    parser = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=(";", "#"))
     try:
         with open(config_path, encoding="utf-8-sig") as handle:
             parser.read_file(handle)
@@ -436,6 +460,8 @@ def default_config_text(config: Config | None = None) -> str:
         f"check_interval_seconds = {cfg.check_interval_seconds}",
         "; تأخیر بعد از بوت تا سرویس‌های دیگر بالا بیایند",
         f"startup_delay_seconds = {cfg.startup_delay_seconds}",
+        "; در وضعیت بحرانی (بالای آستانه‌ی بحرانی) هر چند ثانیه چک شود",
+        f"critical_poll_seconds = {cfg.critical_poll_seconds}",
         "",
         "[policy]",
         "; آستانه‌ی شروع پاک‌سازی (درصد)",
@@ -448,6 +474,10 @@ def default_config_text(config: Config | None = None) -> str:
         f"max_purges_per_hour = {cfg.max_purges_per_hour}",
         "; اگر این مقدار حافظه آزاد باشد هرگز پاک‌سازی نمی‌شود (۰ = غیرفعال)",
         f"min_available_mb = {cfg.min_available_mb}",
+        "; نقطه‌ی بحرانی: بالاتر از این درصد، بدون انتظار برای فاصله‌ی عادی اجرا می‌شود (۰ = غیرفعال)",
+        f"sustained_trigger_percent = {cfg.sustained_trigger_percent}",
+        "; چند بررسی متوالی بالای آستانه‌ی بحرانی لازم است",
+        f"sustained_polls = {cfg.sustained_polls}",
         "",
         "[standby]",
         "; خالی کردن Standby List (کش حافظه)",

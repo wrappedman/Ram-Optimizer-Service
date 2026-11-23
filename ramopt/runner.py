@@ -8,12 +8,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
+import os
 import threading
 
 from ramopt import memory as memory_mod
-from ramopt import win32
-from ramopt.config import Config
+from ramopt import paths, win32
+from ramopt.config import Config, load_config
 from ramopt.engine import Action, OptimizerEngine
 from ramopt.logging_setup import log_startup_banner
 from ramopt.status import StatusWriter
@@ -45,6 +47,26 @@ class OptimizerRunner:
     # -- کنترل -------------------------------------------------------------
     def stop(self) -> None:
         self._stop_event.set()
+
+    def apply_config(self, config: Config) -> None:
+        """اعمال پیکربندی جدید بدون ری‌استارت (از طریق پوشه‌ی command)."""
+        old = self.config
+        self.config = config
+        self.engine.config = config
+        if config.trigger_percent != old.trigger_percent or (
+            config.reset_percent != old.reset_percent
+        ):
+            # آستانه‌ها عوض شده‌اند → حالت قبلی معنی ندارد
+            self.engine._reset_state()
+        logger.info(
+            "پیکربندی جدید اعمال شد | آستانه %d%% (ریست %d%%) | فاصله %d ثانیه | بحرانی %d%%",
+            config.trigger_percent,
+            config.reset_percent,
+            config.check_interval_seconds,
+            config.sustained_trigger_percent,
+        )
+        self.status.extra["config_revision"] = self.status.extra.get("config_revision", 0) + 1
+        self.status.write()
 
     def pause(self, reason: str = "درخواست مدیر سرویس") -> None:
         self.engine.pause(reason)
@@ -126,6 +148,7 @@ class OptimizerRunner:
                 self.engine.last_purge_at + dt.timedelta(seconds=self.config.cooldown_seconds)
             ).isoformat(timespec="seconds")
         self.status.next_allowed_at = next_allowed
+        self.status.extra["critical"] = result.critical
         self.status.write()
 
         if self._cycles % HEARTBEAT_EVERY_N_CYCLES == 0:
@@ -138,18 +161,75 @@ class OptimizerRunner:
                 float(self.status.counters.get("freed_mb", 0.0)),
             )
 
+    # -- پوشه‌ی command: pause / resume / reload از بیرون -----------------
+    def _command_path(self) -> str:
+        return os.path.join(paths.data_dir(), "command.json")
+
+    def _poll_command(self) -> None:
+        """اجرای دستورهای بیرونی (``ramopt pause`` / ``resume`` / ``reload``).
+
+        چرا فایل و نه IPC؟ هر روش IPC یک پنجره‌ی امنیتی روی یک سرویس SYSTEM
+        باز می‌کند (named pipe یا TCP). یک فایل در ProgramData که فقط
+        Administrators می‌توانند بنویسند، ساده‌تر و امن‌تر است و پس از اجرا
+        حذف می‌شود.
+        """
+        path = self._command_path()
+        if not os.path.isfile(path):
+            return
+        try:
+            with open(path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+            command = str(payload.get("command", "")).strip().lower()
+        except (OSError, ValueError):
+            command = ""
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+        if command == "pause":
+            self.pause("درخواست از خط فرمان")
+        elif command == "resume":
+            self.resume()
+        elif command in ("reload", "config"):
+            config, issues = load_config()
+            for issue in issues:
+                logger.warning("پیکربندی: [%s] %s → %s", issue.key, issue.value, issue.message)
+            self.apply_config(config)
+        elif command:
+            logger.warning("دستور ناشناخته در command.json: %r", command)
+        else:
+            logger.warning("command.json بدون کلید command — نادیده گرفته شد.")
+
+    def next_interval(self) -> int:
+        """فاصله تا بررسی بعدی (ثانیه).
+
+        عادی: ``check_interval_seconds`` (پیش‌فرض ۶۰ = هر یک دقیقه).
+        بحرانی: ``critical_poll_seconds`` (پیش‌فرض ۵) تا اگر وضعیت بدتر شد
+        منتظر یک دقیقه‌ی بعد نمانیم.
+        """
+        if self.engine.critical and self.config.critical_poll_seconds > 0:
+            return min(self.config.critical_poll_seconds, self.config.check_interval_seconds)
+        return self.config.check_interval_seconds
+
     def run_forever(self) -> None:
         """حلقه‌ی اصلی. با ``stop()`` بلافاصله خارج می‌شود (نه با خواب طولانی)."""
         self.prepare()
         logger.info(
-            "حلقه‌ی بهینه‌سازی شروع شد (فاصله: %d ثانیه).", self.config.check_interval_seconds
+            "حلقه‌ی بهینه‌سازی شروع شد | بررسی عادی هر %d ثانیه | "
+            "در وضعیت بحرانی (≥%d%%) هر %d ثانیه",
+            self.config.check_interval_seconds,
+            self.config.sustained_trigger_percent,
+            self.config.critical_poll_seconds,
         )
 
         while not self._stop_event.is_set():
+            self._poll_command()
             self.run_once()
             # wait روی Event: توقف سرویس بلافاصله جواب می‌دهد و لازم نیست
             # تا پایان sleep صبر کنیم.
-            if self._stop_event.wait(self.config.check_interval_seconds):
+            if self._stop_event.wait(self.next_interval()):
                 break
 
         self.status.state = "stopped"

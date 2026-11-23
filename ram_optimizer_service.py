@@ -48,16 +48,6 @@ _install_early_crash_logger()
 
 # ---------------------------------------------------------------------------
 
-SERVICE_LEGACY_OPTIONS = {"--startup", "--username", "--password", "--wait"}
-
-
-def _normalize_argv(argv: list[str]) -> list[str]:
-    """پشتیبانی از سینتکس قدیمی: ``install --startup auto`` → ``service install``."""
-    args = list(argv)
-    if args and args[0] in SERVICE_LEGACY_OPTIONS:
-        args = ["service", "install", *args]
-    return args
-
 
 def _is_service_start(argv: list[str]) -> bool:
     """SCM برنامه را بدون آرگومان اجرا می‌کند."""
@@ -107,7 +97,9 @@ def main(argv: list[str] | None = None) -> int:
 
     from ramopt.cli import main as cli_main
 
-    return cli_main(_normalize_argv(args[1:]))
+    # دستورهای قدیمی (install/start/remove/…) در ramopt.cli.normalize_argv
+    # به «service <action>» تبدیل می‌شوند.
+    return cli_main(args[1:])
 
 
 if __name__ == "__main__":

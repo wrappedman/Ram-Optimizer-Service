@@ -38,6 +38,38 @@ EXIT_NOT_WINDOWS = 3
 # ----------------------------------------------------------------------------
 
 
+#: سینتکس قدیمی نسخه‌ی ۱: exe install --startup auto
+#: توجه: "pause" عمداً این‌جا نیست؛ فرمان pause مربوط به سرویس در حال اجراست
+#: و به شکل «service pause» نوشته می‌شود.
+_SERVICE_ACTIONS = {
+    "install",
+    "remove",
+    "start",
+    "stop",
+    "restart",
+    "continue",
+    "query",
+    "repair",
+}
+_LEGACY_SERVICE_OPTIONS = {"--startup", "--username", "--password", "--wait"}
+
+
+def normalize_argv(argv: list[str]) -> list[str]:
+    """پشتیبانی از دستورهای نسخه‌ی ۱ بدون شکستن فرم جدید.
+
+    * ``install --startup auto`` → ``service install`` (گزینه‌ها حذف می‌شوند)
+    * ``install`` / ``remove`` / ``start`` / ``stop`` … → ``service <action>``
+    """
+    args = list(argv)
+    if not args:
+        return args
+    if args[0] in _SERVICE_ACTIONS:
+        return ["service", args[0]]
+    if args[0] in _LEGACY_SERVICE_OPTIONS:
+        return ["service", "install"]
+    return args
+
+
 def _force_utf8_console() -> None:
     """کنسول ویندوز اغلب cp1256/cp437 است و چاپ متن فارسی را می‌شکند."""
     for stream in (sys.stdout, sys.stderr):
@@ -320,6 +352,44 @@ def cmd_once(args) -> int:
     return EXIT_OK if result is not None and result.action.value != "error" else EXIT_ERROR
 
 
+def _write_command(command: str) -> int:
+    """نوشتن ``command.json`` برای سرویس در حال اجرا (pause/resume/reload)."""
+    import json
+
+    target = os.path.join(paths.data_dir(), "command.json")
+    try:
+        os.makedirs(paths.data_dir(), exist_ok=True)
+        temp = target + ".tmp"
+        with open(temp, "w", encoding="utf-8") as handle:
+            json.dump({"command": command, "created_at": _now_iso()}, handle)
+        os.replace(temp, target)
+    except OSError as exc:
+        _print(f"خطا: نوشتن {target} ناموفق بود: {exc}")
+        _print("برای این کار باید با دسترسی Administrator اجرا شود.")
+        return EXIT_ERROR
+    _print(f"دستور «{command}» ثبت شد. سرویس حداکثر در بررسی بعدی آن را اعمال می‌کند.")
+    _print(f"فایل: {target}")
+    return EXIT_OK
+
+
+def _now_iso() -> str:
+    import datetime
+
+    return datetime.datetime.now().isoformat(timespec="seconds")
+
+
+def cmd_pause(_args) -> int:
+    return _write_command("pause")
+
+
+def cmd_resume(_args) -> int:
+    return _write_command("resume")
+
+
+def cmd_reload(_args) -> int:
+    return _write_command("reload")
+
+
 def cmd_log(args) -> int:
     log_path = paths.log_file()
     if not os.path.isfile(log_path):
@@ -434,6 +504,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     service_parser.set_defaults(func=cmd_service)
 
+    subparsers.add_parser("pause", help="توقف موقت پاک‌سازی در سرویس در حال اجرا").set_defaults(
+        func=cmd_pause
+    )
+    subparsers.add_parser("resume", help="ادامه‌ی پاک‌سازی پس از pause").set_defaults(func=cmd_resume)
+    subparsers.add_parser(
+        "reload", help="خواندن دوباره‌ی config.ini بدون ری‌استارت سرویس"
+    ).set_defaults(func=cmd_reload)
+
     log_parser = subparsers.add_parser("log", help="نمایش انتهای لاگ")
     log_parser.add_argument("--lines", type=int, default=40)
     log_parser.set_defaults(func=cmd_log)
@@ -450,7 +528,7 @@ def _version_text() -> str:
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_console()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(normalize_argv(list(sys.argv[1:] if argv is None else argv)))
     try:
         return int(args.func(args))
     except KeyboardInterrupt:

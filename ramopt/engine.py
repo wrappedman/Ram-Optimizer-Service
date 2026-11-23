@@ -58,6 +58,8 @@ class Decision:
     reason: str
     mode: Mode
     should_optimize: bool = False
+    #: وضعیت بحرانی است → چرخه‌ی بعدی نباید یک دقیقه صبر کند
+    critical: bool = False
     details: dict[str, object] = field(default_factory=dict)
 
 
@@ -79,6 +81,7 @@ class CycleResult:
     trim: memory_mod.TrimReport | None = None
     purge: memory_mod.PurgeReport | None = None
     duration_ms: float = 0.0
+    critical: bool = False
     environment: dict[str, object] = field(default_factory=dict)
 
     @property
@@ -103,6 +106,7 @@ class CycleResult:
             "standby_mb_after": _round(self.standby_mb_after),
             "freed_mb": round(self.freed_mb, 1),
             "duration_ms": round(self.duration_ms, 1),
+            "critical": self.critical,
             "environment": self.environment,
             "trim": self.trim.as_dict() if self.trim else None,
             "purge": self.purge.as_dict() if self.purge else None,
@@ -141,6 +145,10 @@ class OptimizerEngine:
         self.started_at = self._now()
         self.total_purges = 0
         self.total_freed_mb = 0.0
+        #: شمارنده‌ی بررسی‌های متوالی بالای آستانه‌ی بحرانی
+        self.critical_streak = 0
+        #: آیا در آخرین بررسی وضعیت «بحرانی» بود؟
+        self.critical = False
         self.last_result: CycleResult | None = None
 
     # -- کنترل خارجی (پاز/ریزیوم از سرویس یا CLI) -------------------------
@@ -189,6 +197,33 @@ class OptimizerEngine:
             return start <= now < end
         return now >= start or now < end  # بازه‌ای که از نیمه‌شب می‌گذرد
 
+    def _reset_state(self) -> None:
+        """ریست کردن حالت سیاست (پس از نصب تنظیمات جدید)."""
+        self.mode = Mode.IDLE
+        self.last_purge_at = None
+        self.purge_history.clear()
+        self.consecutive_useless = 0
+        self.critical_streak = 0
+        self.critical = False
+        self.started_at = self._now()
+
+    def _update_critical(self, used: float) -> bool:
+        """به‌روزرسانی شمارنده‌ی «وضعیت بحرانی».
+
+        «مصرف» در ویندوز شامل کش (standby) است، پس عدد ۹۲٪ می‌تواند فقط یک
+        کش بزرگ باشد. برای همین علاوه بر آستانه، «حداقل حافظه‌ی آزاد» هم باید
+        کم باشد؛ وگرنه هیچ‌وقت به حالت بحرانی نمی‌رسیم (بهتر از اجرای بی‌فایده).
+        """
+        config = self.config
+        if config.sustained_trigger_percent <= 0:
+            self.critical_streak = 0
+            self.critical = False
+            return False
+        over = used >= config.sustained_trigger_percent
+        self.critical_streak = self.critical_streak + 1 if over else 0
+        self.critical = self.critical_streak >= max(1, config.sustained_polls)
+        return self.critical
+
     def _blocking_environment(self) -> tuple[str, dict[str, object]]:
         """شرایطی که پاک‌سازی باید کنار بماند. خروجی: (دلیل, جزئیات)."""
         details: dict[str, object] = {}
@@ -225,6 +260,35 @@ class OptimizerEngine:
         """تصمیم خالص: آیا باید پاک‌سازی شود و چرا؟"""
         used = reading.used_percent
         config = self.config
+        critical = self._update_critical(used)
+
+        # --- وضعیت بحرانی: فرایند عادی محدودیت‌ها را دور می‌زند -----------
+        if critical:
+            if self.paused:
+                return Decision(
+                    Action.SKIPPED,
+                    self.pause_reason or "موقتاً متوقف شده",
+                    self.mode,
+                    critical=True,
+                )
+            # در وضعیت بحرانی حتی اگر حالت IDLE بود (مثلاً کانفیگ ریست شده)
+            # باید اقدام شود؛ RAM دارد تمام می‌شود.
+            if self.mode is Mode.IDLE:
+                self.mode = Mode.ARMED
+                logger.warning(
+                    "وضعیت بحرانی: مصرف %.1f%% ≥ %d%% (آستانه‌ی عادی %d%%) — اجرای فوری.",
+                    used,
+                    config.sustained_trigger_percent,
+                    config.trigger_percent,
+                )
+            return Decision(
+                Action.OPTIMIZED,
+                f"وضعیت بحرانی (مصرف {used:.1f}% ≥ {config.sustained_trigger_percent}%) "
+                f"— اجرای فوری بدون انتظار",
+                self.mode,
+                should_optimize=True,
+                critical=True,
+            )
 
         # --- هیسترزیس -------------------------------------------------
         if self.mode is Mode.IDLE:
@@ -328,6 +392,7 @@ class OptimizerEngine:
             available_mb_before=reading.available_mb,
             commit_percent=reading.commit_percent,
             standby_mb_before=reading.standby_mb,
+            critical=decision.critical,
             environment=environment,
         )
 
