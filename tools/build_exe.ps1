@@ -32,7 +32,12 @@ param(
     [switch]$SkipTests
 )
 
-$ErrorActionPreference = 'Stop'
+# 'Continue', not 'Stop': PowerShell 7 turns a native program's stderr output
+# into a terminating ErrorRecord, and pip writes perfectly normal warnings to
+# stderr ("WARNING: Package(s) not found"). With 'Stop' that aborted the build
+# (CI run 45177055760). Every step below checks $LASTEXITCODE explicitly, and
+# the file cmdlets that matter pass -ErrorAction Stop.
+$ErrorActionPreference = 'Continue'
 $script:Root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 # Interpreter + launcher arguments chosen in step 0 ("py" + "-3.11", or "python").
 $script:PrefixExe = 'python'
@@ -119,7 +124,7 @@ if (Test-Path -LiteralPath $venvPython) {
     } elseif ($existing) {
         Write-Note ".venv uses Python $(Format-VersionCode $existing), which PyInstaller does not support."
         Write-Note 'Deleting .venv and creating a supported one...'
-        Remove-Item -LiteralPath (Join-Path $script:Root '.venv') -Recurse -Force
+        Remove-Item -LiteralPath (Join-Path $script:Root '.venv') -Recurse -Force -ErrorAction Stop
     }
 }
 
@@ -214,10 +219,10 @@ if ($LASTEXITCODE -ne 0) {
 # A third-party PyPI package literally named "servicemanager" shadows pywin32's
 # own module inside the frozen exe ("service did not respond in a timely
 # fashion"). Make sure it is not installed.
-& $py -m pip show servicemanager *> $null
+& $py -m pip show servicemanager 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) {
     Write-Note 'removing the conflicting PyPI package "servicemanager"'
-    & $py -m pip uninstall -y servicemanager *> $null
+    & $py -m pip uninstall -y servicemanager 2>$null | Out-Null
 }
 
 # --- 3) tests ---------------------------------------------------------------
@@ -247,8 +252,10 @@ if ($LASTEXITCODE -ne 0) { Write-Fail 'PyInstaller failed (see the message above
 # --- 6) copy into build\ ----------------------------------------------------
 Write-Step '6/6 copying the result into build\'
 $target = Join-Path $script:Root 'build\RamOptimizerService'
-if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $target | Out-Null
+if (Test-Path -LiteralPath $target) {
+    Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+}
+New-Item -ItemType Directory -Force -Path $target -ErrorAction Stop | Out-Null
 Copy-Item -Path (Join-Path $script:Root 'dist\RamOptimizerService\*') -Destination $target -Recurse -Force
 & $py tools\make_build_info.py
 if ($LASTEXITCODE -ne 0) { Write-Fail 'make_build_info.py failed.'; exit 1 }
