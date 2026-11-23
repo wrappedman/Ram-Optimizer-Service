@@ -151,13 +151,17 @@ def cmd_config(args) -> int:
         return EXIT_OK
 
     config, issues = _load(args)
+    effective_path = args.config or paths.config_file()
     if args.validate:
         if issues:
             _print(f"{len(issues)} مشکل در فایل پیکربندی:")
             _report_issues(issues)
             return EXIT_ERROR
+        if not os.path.isfile(effective_path):
+            _print(f"فایل پیکربندی وجود ندارد: {effective_path} (مقادیر پیش‌فرض استفاده می‌شوند)")
+            return EXIT_OK
         _print("فایل پیکربندی معتبر است. ✔")
-        _print(f"مسیر: {paths.config_file()}")
+        _print(f"مسیر: {effective_path}")
         return EXIT_OK
 
     _report_issues(issues)
@@ -169,7 +173,7 @@ def cmd_config(args) -> int:
                 value = ", ".join(value)
             _print(f"  {key} = {value}")
         _print()
-    _print(f"مسیر فایل پیکربندی: {paths.config_file()}")
+    _print(f"مسیر فایل پیکربندی: {effective_path}")
     return EXIT_OK
 
 

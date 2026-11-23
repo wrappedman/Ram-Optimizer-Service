@@ -38,6 +38,9 @@ def test_config_validate_ok(tmp_path, capsys):
     target = tmp_path / "good.ini"
     assert main(["--config", str(target), "config", "--init"]) == 0
     assert main(["--config", str(target), "config", "--validate"]) == 0
+    out = capsys.readouterr().out
+    assert "معتبر" in out
+    assert str(target) in out  # مسیر نمایش‌داده‌شده باید همان فایل داده‌شده باشد
 
 
 def test_config_show_prints_all_sections(capsys):
