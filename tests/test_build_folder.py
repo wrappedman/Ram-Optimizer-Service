@@ -244,7 +244,7 @@ def test_tool_scripts_survive_a_non_utf8_console(monkeypatch, capsys) -> None:
         def __init__(self) -> None:
             self.buffer = []
 
-        def write(self, text: str) -> int:  # noqa: D401 - شبیه‌سازی
+        def write(self, text: str) -> int:
             text.encode("cp1252")  # مثل کنسول واقعی: خطا می‌دهد
             self.buffer.append(text)
             return len(text)

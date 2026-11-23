@@ -18,7 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _console import force_utf8_console, say  # noqa: E402
+from _console import force_utf8_console, say
 
 from ramopt.version import __version__, build_info
 
