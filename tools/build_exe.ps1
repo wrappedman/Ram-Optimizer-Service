@@ -51,20 +51,38 @@ function Write-Ok([string]$Text) { Write-Host "[ OK ]  $Text" -ForegroundColor G
 function Write-Note([string]$Text) { Write-Host "[ .. ]  $Text" -ForegroundColor Yellow }
 function Write-Fail([string]$Text) { Write-Host "[FAIL]  $Text" -ForegroundColor Red }
 
-# Run a candidate interpreter and print "major.minor" (nothing on failure).
-function Get-PythonVersion([string]$CommandLine) {
+# Split "py -3.11" into the executable and its leading arguments.
+function Split-CommandLine([string]$CommandLine) {
     $parts = $CommandLine.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
-    $exe = $parts[0]
-    $prefix = @()
-    if ($parts.Length -gt 1) { $prefix = $parts[1..($parts.Length - 1)] }
-    $code = 'import sys; print("%d.%d" % sys.version_info[:2])'
+    $result = @{ Exe = $parts[0]; Args = @() }
+    if ($parts.Length -gt 1) { $result.Args = $parts[1..($parts.Length - 1)] }
+    return $result
+}
+
+# Ask an interpreter for its "major.minor" version.
+#
+# Implementation notes (these cost me two red CI runs):
+#  * PowerShell 7 turns a native command's stderr into an ErrorRecord when the
+#    error stream is redirected, which threw away perfectly good stdout. So do
+#    not merge stderr; just capture stdout.
+#  * The "python" on PATH may be a Microsoft Store alias stub that prints
+#    nothing and exits non-zero; that must be a normal "not usable" answer.
+#  * `py -3.11` prints "No runtime installed that matches 3.11" on stderr and
+#    exits non-zero: same answer.
+function Get-PythonVersion([string]$CommandLine) {
+    $split = Split-CommandLine $CommandLine
+    $code = 'import sys; print("%d.%d" % (sys.version_info[0], sys.version_info[1]))'
+    $output = $null
     try {
-        $output = & $exe @prefix -c $code 2>$null
+        $output = & $split.Exe @($split.Args) -c $code
+        $exit = $LASTEXITCODE
     } catch {
         return $null
     }
-    if ($LASTEXITCODE -ne 0 -or -not $output) { return $null }
-    return ($output | Select-Object -First 1).ToString().Trim()
+    if ($exit -ne 0 -or -not $output) { return $null }
+    $text = ($output | Select-Object -First 1).ToString().Trim()
+    if ($text -notmatch '^\d+\.\d+$') { return $null }
+    return $text
 }
 
 function Test-VenvVersion([string]$Version) {
@@ -130,11 +148,22 @@ if (-not $reuseVenv -and -not $chosen) {
     Write-Host '   4) Skip the build entirely: download the exe from the CI artifact'
     Write-Host '      "RamOptimizerService-windows" (GitHub -> Actions -> latest green run)'
     Write-Host ''
-    Write-Host '  Detected interpreters:' -ForegroundColor Yellow
-    try { & py --list 2>$null | ForEach-Object { Write-Host "     $_" } } catch { }
-    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
-        Write-Host '     (the py launcher is not installed)'
+    Write-Host '  What this machine offers:' -ForegroundColor Yellow
+    foreach ($name in @('py', 'python', 'python3')) {
+        $found = Get-Command $name -ErrorAction SilentlyContinue
+        if ($found) {
+            $version = Get-PythonVersion $name
+            if ($version) {
+                Write-Host "     $name -> $version ($($found.Source))"
+            } else {
+                Write-Host "     $name -> not usable ($($found.Source))"
+            }
+        } else {
+            Write-Host "     $name -> not on PATH"
+        }
     }
+    Write-Host "  Interpreter the script found: $chosen"
+    Write-Host "  PowerShell version: $($PSVersionTable.PSVersion)"
     exit 2
 }
 
@@ -145,10 +174,9 @@ if ($reuseVenv) {
     Write-Step '1/6 using the existing .venv'
 } else {
     Write-Step "1/6 creating .venv with '$chosen'"
-    $parts = $chosen.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
-    $script:PrefixExe = $parts[0]
-    $script:PrefixArgs = @()
-    if ($parts.Length -gt 1) { $script:PrefixArgs = $parts[1..($parts.Length - 1)] }
+    $split = Split-CommandLine $chosen
+    $script:PrefixExe = $split.Exe
+    $script:PrefixArgs = $split.Args
     & $script:PrefixExe @script:PrefixArgs -m venv .venv
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $venvPython)) {
         Write-Fail 'Creating the virtual environment failed (see the message above).'
