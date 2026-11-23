@@ -76,15 +76,36 @@ jobs:
           foreach ($line in $lines) { Write-Output "::error::$($line.Line)" }
           if (-not $lines) { Get-Content pytest-out.txt -Tail 40 | ForEach-Object { Write-Output "::error::$_" } }
 
-      - name: Build exe
+      - name: Build exe into build/
+        shell: pwsh
         run: |
           python tools/make_version_info.py
           pyinstaller --clean --noconfirm RamOptimizerService.spec
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          if (Test-Path build\RamOptimizerService) { Remove-Item -Recurse -Force build\RamOptimizerService }
+          Copy-Item -Recurse -Force dist\RamOptimizerService build\RamOptimizerService
+          python tools/make_build_info.py
+
+      - name: Check the control panel in build/
+        shell: pwsh
+        run: |
+          # The PowerShell panel must at least parse and describe itself; its
+          # Windows-only actions are exercised by the smoke test below.
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path build\RamOptimizerControl.ps1), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count) {
+            $errors | ForEach-Object { Write-Output "::error::PS syntax: $($_.Message)" }
+            exit 1
+          }
+          $help = & powershell -NoProfile -ExecutionPolicy Bypass -File build\RamOptimizerControl.ps1 -Action doctor
+          if ($LASTEXITCODE -ne 0) { throw "control panel doctor failed" }
+          if (-not (Test-Path build\Manage-RamOptimizer.bat)) { throw "Manage-RamOptimizer.bat is missing" }
 
       - name: Smoke test the built exe
         shell: pwsh
         run: |
-          $exe = "dist\RamOptimizerService\RamOptimizerService.exe"
+          $exe = "build\RamOptimizerService\RamOptimizerService.exe"
           if (-not (Test-Path $exe)) { throw "exe was not built" }
           & $exe version
           if ($LASTEXITCODE -ne 0) { throw "version command failed" }
@@ -94,9 +115,14 @@ jobs:
           & $exe test --dry-run
           if ($LASTEXITCODE -ne 0) { throw "dry-run failed" }
 
-      - name: Upload build artifact
+      - name: Upload build/ (exe + control panel) as an artifact
         uses: actions/upload-artifact@v4
         with:
           name: RamOptimizerService-windows
-          path: dist/RamOptimizerService/
+          path: |
+            build/RamOptimizerService/
+            build/Manage-RamOptimizer.bat
+            build/RamOptimizerControl.ps1
+            build/build_info.json
+            build/SHA256SUMS.txt
           retention-days: 14

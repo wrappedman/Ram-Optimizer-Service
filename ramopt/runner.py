@@ -16,7 +16,7 @@ import threading
 from ramopt import memory as memory_mod
 from ramopt import paths, win32
 from ramopt.config import Config, load_config
-from ramopt.engine import Action, OptimizerEngine
+from ramopt.engine import Action, CycleResult, OptimizerEngine
 from ramopt.logging_setup import log_startup_banner
 from ramopt.status import StatusWriter
 
@@ -109,7 +109,7 @@ class OptimizerRunner:
         self.status.write()
 
     # -- حلقه --------------------------------------------------------------
-    def run_once(self) -> None:
+    def run_once(self) -> CycleResult | None:
         """یک چرخه (بدون خوابیدن). استثناها این‌جا گرفته می‌شوند."""
         timestamp = dt.datetime.now().isoformat(timespec="seconds")
         try:
@@ -120,7 +120,7 @@ class OptimizerRunner:
             self.status.last_cycle_at = timestamp
             self.status.last_action = "error"
             self.status.write()
-            return
+            return None
 
         self._cycles += 1
         self.status.last_cycle_at = result.timestamp
@@ -160,6 +160,7 @@ class OptimizerRunner:
                 self.status.counters.get("purges", 0),
                 float(self.status.counters.get("freed_mb", 0.0)),
             )
+        return result
 
     # -- پوشه‌ی command: pause / resume / reload از بیرون -----------------
     def _command_path(self) -> str:
@@ -213,23 +214,73 @@ class OptimizerRunner:
             return min(self.config.critical_poll_seconds, self.config.check_interval_seconds)
         return self.config.check_interval_seconds
 
+    def _memory_is_critical(self) -> bool:
+        """آیا همین حالا مصرف از آستانه‌ی بحرانی گذشته است؟
+
+        فقط یک خواندن سبک GlobalMemoryStatusEx — بدون تصمیم، بدون پاک‌سازی.
+        """
+        try:
+            snapshot = self.api.memory_snapshot()
+        except Exception:  # pragma: no cover - دفاعی
+            return False
+        if snapshot is None:
+            return False
+        return snapshot.used_percent >= self.config.sustained_trigger_percent
+
+    def wait_next(self, seconds: int) -> bool:
+        """خواب بین دو چرخه، ولی با بیدار شدن زودهنگام اگر رم بحرانی شد.
+
+        چرا؟ «فوراً» باید واقعاً فوری باشد: اگر در ثانیه‌ی ۳ یک برنامه ۳ گیگ
+        بگیرد، نباید تا ثانیه‌ی ۶۰ صبر کنیم. حداکثر هر
+        ``critical_probe_seconds`` (پیش‌فرض ۲) ثانیه یک خواندن بسیار ارزان
+        انجام می‌شود؛ به‌محض عبور از آستانه‌ی بحرانی بیدار می‌شویم.
+
+        خروجی ``True`` یعنی باید حلقه خارج شود (توقف درخواست شده).
+        """
+        if self._stop_event.is_set():
+            return True
+        probe = self.config.critical_probe_seconds
+        if probe <= 0:
+            return self._stop_event.wait(seconds)
+
+        import time
+
+        deadline = time.monotonic() + seconds
+        while not self._stop_event.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            # بیشتر از یک probe صبر نکن، و هرگز از باقی‌مانده بیشتر
+            if self._stop_event.wait(min(probe, remaining)):
+                return True
+            if self._memory_is_critical():
+                logger.warning(
+                    "حافظه در فاصله‌ی بین دو چرخه بحرانی شد (≥%d%%) — "
+                    "چرخه‌ی بعدی همین حالا اجرا می‌شود (بدون انتظار برای %d ثانیه).",
+                    self.config.sustained_trigger_percent,
+                    seconds,
+                )
+                return False
+        return True
+
     def run_forever(self) -> None:
         """حلقه‌ی اصلی. با ``stop()`` بلافاصله خارج می‌شود (نه با خواب طولانی)."""
         self.prepare()
         logger.info(
             "حلقه‌ی بهینه‌سازی شروع شد | بررسی عادی هر %d ثانیه | "
-            "در وضعیت بحرانی (≥%d%%) هر %d ثانیه",
+            "در وضعیت بحرانی (≥%d%%) هر %d ثانیه (پایش هر %d ثانیه)",
             self.config.check_interval_seconds,
             self.config.sustained_trigger_percent,
             self.config.critical_poll_seconds,
+            self.config.critical_probe_seconds,
         )
 
         while not self._stop_event.is_set():
             self._poll_command()
             self.run_once()
-            # wait روی Event: توقف سرویس بلافاصله جواب می‌دهد و لازم نیست
-            # تا پایان sleep صبر کنیم.
-            if self._stop_event.wait(self.next_interval()):
+            # wait روی Event: توقف سرویس بلافاصله جواب می‌دهد؛ و در وضعیت
+            # بحرانی/نزدیک بحرانی، بیدار شدن زودهنگام.
+            if self.wait_next(self.next_interval()):
                 break
 
         self.status.state = "stopped"

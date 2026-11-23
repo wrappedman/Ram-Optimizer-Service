@@ -390,6 +390,166 @@ def cmd_reload(_args) -> int:
     return _write_command("reload")
 
 
+def cmd_verify(args) -> int:
+    """بررسی عملی سناریو: هر یک دقیقه + واکنش فوری در وضعیت بحرانی.
+
+    فقط اندازه‌گیری می‌کند؛ هیچ trim/purge ای انجام نمی‌شود (برای همین
+    ``--dry-run`` اجباری است). با ``--simulate-critical`` آستانه‌ی بحرانی
+    موقتاً پایین می‌آید تا روی ماشین سالم هم مسیر فوری دیده شود.
+    """
+    import time
+
+    from ramopt import memory as memory_mod
+    from ramopt import paths
+    from ramopt.config import Config, load_config
+
+    config, issues = load_config(getattr(args, "config", None) or None)
+    for issue in issues:
+        _print(f"⚠ [{issue.section}] {issue.key}: {issue.message}")
+
+    interval = config.check_interval_seconds
+    critical_poll = config.critical_poll_seconds
+    threshold = config.sustained_trigger_percent
+
+    _print("سناریوی درخواستی")
+    _print(f"  ۱) آزادسازی خودکار هر {interval} ثانیه در حالت عادی")
+    _print(f"  ۲) به‌محض رسیدن مصرف به {threshold}% → همان لحظه (بدون انتظار)")
+    _print(
+        f"     حتی وسط خواب یک‌دقیقه‌ای: پایش سبک هر {config.critical_probe_seconds} ثانیه"
+    )
+    _print(f"     و بعد از آن بررسی هر {critical_poll} ثانیه تا پایین آمدن")
+    _print("")
+    _print("پیکربندی مؤثر")
+    _print(f"  check_interval_seconds    = {interval}")
+    _print(f"  critical_poll_seconds     = {critical_poll}")
+    _print(f"  critical_probe_seconds    = {config.critical_probe_seconds}")
+    _print(f"  trigger_percent           = {config.trigger_percent}")
+    _print(f"  sustained_trigger_percent = {threshold}")
+    _print(f"  sustained_polls           = {config.sustained_polls}")
+    _print(f"  cooldown_seconds          = {config.cooldown_seconds}")
+    _print("")
+
+    reading = memory_mod.measure(_api_for_verify())
+    if reading.snapshot is None:
+        _print("خطا: خواندن وضعیت حافظه ممکن نیست.")
+        return EXIT_ERROR
+
+    used = reading.used_percent
+    total_mb = reading.snapshot.total_bytes / (1024 * 1024)
+    pending = "?" if reading.standby_mb is None else f"{reading.standby_mb:.0f}"
+    _print("وضعیت فعلی حافظه")
+    _print(f"  مصرف              : {used:.1f}%")
+    _print(f"  آزاد              : {reading.available_mb:.0f}MB از {total_mb:.0f}MB")
+    _print(f"  Standby (قابل آزادسازی): {pending}MB")
+    _print("")
+
+    over_normal = used >= config.trigger_percent
+    over_critical = used >= threshold
+    _print("نتیجه‌ی ارزیابی")
+    _print(f"  آستانه‌ی عادی ({config.trigger_percent}%) رد شده؟ {'بله' if over_normal else 'خیر'}")
+    if over_critical:
+        _print(f"  آستانه‌ی بحرانی ({threshold}%) رد شده → چرخه‌ی بعد فوراً اجرا می‌شود.")
+        _print(f"  فاصله‌ی بررسی بعدی: {critical_poll} ثانیه.")
+    else:
+        _print(f"  بحرانی نیست → فاصله‌ی بررسی بعدی: {interval} ثانیه.")
+        _print(
+            f"  اگر مصرف به {threshold}% برسد، بدون انتظار برای این {interval} ثانیه اجرا می‌شود."
+        )
+
+    if args.simulate_critical:
+        _print("")
+        _print("شبیه‌سازی مسیر بحرانی (بدون تغییر سیستم: هیچ trim/purge ای اجرا نمی‌شود)")
+        from ramopt.engine import Action as _Action
+        from ramopt.engine import OptimizerEngine
+
+        simulated = Config(**{**config.__dict__, "sustained_trigger_percent": 1})
+        engine = OptimizerEngine(simulated, _api_for_verify())
+        decision = engine.decide(reading)
+        if not decision.critical:
+            _print(f"  ⚠ مسیر بحرانی فعال نشد: {decision.reason}")
+            _print("    (مانع محیطی مثل pause / تمام‌صفحه / باتری یا نبود آستانه)")
+            return EXIT_ERROR
+        _print(f"  مصرف فرضی بالای آستانه → تصمیم: {decision.action.value} (فوری)")
+        _print("  ترتیب زمانی که سرویس اجرا می‌کند:")
+        _print(f"    T+0s    خواندن حافظه → عبور از {threshold}% → همان لحظه پاس آزادسازی")
+        _print("    T+0s    تصمیم با critical=True (cooldown و سقف ساعتی دور زده می‌شوند)")
+        _print(f"    T+{critical_poll}s    بررسی بعدی (نه {interval}s)")
+        _print(f"    T+{2 * critical_poll}s    بررسی بعدی … تا وقتی مصرف زیر {threshold}% بیاید")
+        _print(f"    سپس    بازگشت به فاصله‌ی عادی {interval}s")
+        assert decision.action is _Action.OPTIMIZED
+
+    if args.watch > 0:
+        _print("")
+        _print(f"پایش {args.watch} ثانیه‌ای: هر تغییر وضعیت بحرانی گزارش می‌شود.")
+        _print(f"  (سرویس واقعی هر {interval} ثانیه یک بار تصمیم می‌گیرد)")
+        last = None
+        deadline = time.monotonic() + args.watch
+        while time.monotonic() < deadline:
+            current = memory_mod.measure(_api_for_verify())
+            if current.snapshot is not None:
+                state = current.used_percent >= threshold
+                if state != last:
+                    stamp = time.strftime("%H:%M:%S")
+                    label = "بحرانی" if state else "عادی"
+                    _print(f"  [{stamp}] {current.used_percent:5.1f}% → {label}")
+                    last = state
+            time.sleep(min(2.0, max(0.5, critical_poll)))
+
+    _print("")
+    _print(f"لاگ‌ها: {paths.log_file()}")
+    _print("برای دیدن رفتار واقعی: ramopt log --lines 50  یا  build\\Manage-RamOptimizer.bat logs")
+    return EXIT_OK
+
+
+def _api_for_verify():
+    """همان API واقعی (روی ویندوز)؛ روی لینوکس/تست‌ها معادل psutil."""
+    from ramopt import win32
+
+    return win32.Win32Api() if sys.platform == "win32" else _PosixApi()
+
+
+class _PosixApi:
+    """معادل کوچک ``Win32Api`` با psutil — فقط برای ``ramopt verify`` در توسعه.
+
+    سرویس واقعی هرگز از این استفاده نمی‌کند؛ اگر روی لینوکس ``verify`` را اجرا
+    کنید همین استفاده می‌شود تا سناریو بدون ویندوز هم قابل بررسی باشد.
+    """
+
+    available = True
+    load_error = ""
+
+    def __init__(self) -> None:
+        import psutil
+
+        self._psutil = psutil
+        self.monotonic_ms = lambda: int(__import__("time").monotonic() * 1000)
+
+    def memory_snapshot(self):
+        from ramopt.win32 import MemorySnapshot
+
+        vm = self._psutil.virtual_memory()
+        swap = self._psutil.swap_memory()
+        commit_limit = int(vm.total + swap.total)
+        commit_used = int(vm.used + swap.used)
+        return MemorySnapshot(
+            total_bytes=int(vm.total),
+            available_bytes=int(vm.available),
+            used_percent=float(vm.percent),
+            commit_used_bytes=commit_used,
+            commit_limit_bytes=commit_limit,
+            commit_percent=round(commit_used * 100.0 / commit_limit, 1) if commit_limit else 0.0,
+        )
+
+    def standby_bytes(self) -> int | None:
+        return None
+
+    def user_notification_state(self) -> None:
+        return None
+
+    def is_on_battery(self) -> bool:
+        return False
+
+
 def cmd_log(args) -> int:
     log_path = paths.log_file()
     if not os.path.isfile(log_path):
@@ -424,13 +584,20 @@ def _with_overrides(config, **overrides):
 def _grouped(data: dict) -> dict[str, dict]:
     """گروه‌بندی مقادیر Config برای نمایش."""
     mapping = {
-        "general": ["check_interval_seconds", "startup_delay_seconds"],
+        "general": [
+            "check_interval_seconds",
+            "startup_delay_seconds",
+            "critical_poll_seconds",
+            "critical_probe_seconds",
+        ],
         "policy": [
             "trigger_percent",
             "reset_percent",
             "cooldown_seconds",
             "max_purges_per_hour",
             "min_available_mb",
+            "sustained_trigger_percent",
+            "sustained_polls",
         ],
         "standby": ["purge_standby_list", "min_free_mb_after_trim", "flush_modified_list"],
         "targets": ["min_process_ws_mb", "max_processes", "exclude", "exclude_patterns"],
@@ -511,6 +678,17 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "reload", help="خواندن دوباره‌ی config.ini بدون ری‌استارت سرویس"
     ).set_defaults(func=cmd_reload)
+
+    verify_parser = subparsers.add_parser(
+        "verify", help="بررسی عملی سناریوی «هر یک دقیقه / بحرانی = فوری»"
+    )
+    verify_parser.add_argument(
+        "--simulate-critical", action="store_true", help="شبیه‌سازی مسیر بحرانی (بدون تغییر سیستم)"
+    )
+    verify_parser.add_argument(
+        "--watch", type=int, default=0, metavar="SECONDS", help="پایش زنده به مدت N ثانیه"
+    )
+    verify_parser.set_defaults(func=cmd_verify)
 
     log_parser = subparsers.add_parser("log", help="نمایش انتهای لاگ")
     log_parser.add_argument("--lines", type=int, default=40)

@@ -5,7 +5,7 @@ __pycache__/
 *.pyd
 *.egg-info/
 .eggs/
-build/
+# NOT build/ itself: that folder holds the committed control panel.
 dist/
 .venv/
 venv/
@@ -17,6 +17,11 @@ coverage.xml
 htmlcov/
 
 # --- PyInstaller / build output ---
+# build/ holds the committed control panel (Manage-RamOptimizer.bat +
+# RamOptimizerControl.ps1). Everything PyInstaller and CI drop in there is
+# ignored, so the folder stays small and reviewable.
+build/RamOptimizerService/
+build/*.zip
 release/
 installer/Output/
 installer/*.exe

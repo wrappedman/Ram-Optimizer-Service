@@ -123,6 +123,9 @@ class Config:
     sustained_polls: int = 1
     #: فاصله‌ی بررسی هنگام بحرانی بودن وضعیت (ثانیه)
     critical_poll_seconds: int = 5
+    #: در فاصله‌ی بین دو چرخه، هر چند ثانیه یک خواندن سبک انجام شود تا اگر
+    #: حافظه بحرانی شد همان لحظه بیدار شویم (۰ = فقط خواب معمولی)
+    critical_probe_seconds: int = 2
 
     # --- standby ---
     purge_standby_list: bool = True
@@ -288,6 +291,24 @@ def config_from_parser(
             issues,
             minimum=0,
             maximum=3600,
+        ),
+        critical_poll_seconds=_get_int(
+            parser,
+            "general",
+            "critical_poll_seconds",
+            defaults.critical_poll_seconds,
+            issues,
+            minimum=1,
+            maximum=300,
+        ),
+        critical_probe_seconds=_get_int(
+            parser,
+            "general",
+            "critical_probe_seconds",
+            defaults.critical_probe_seconds,
+            issues,
+            minimum=0,
+            maximum=60,
         ),
         trigger_percent=_get_int(
             parser,
@@ -462,6 +483,8 @@ def default_config_text(config: Config | None = None) -> str:
         f"startup_delay_seconds = {cfg.startup_delay_seconds}",
         "; در وضعیت بحرانی (بالای آستانه‌ی بحرانی) هر چند ثانیه چک شود",
         f"critical_poll_seconds = {cfg.critical_poll_seconds}",
+        "; بین دو چرخه هر چند ثانیه یک خواندن سبک؛ اگر رم بحرانی شد همان لحظه بیدار شو (۰ = خاموش)",
+        f"critical_probe_seconds = {cfg.critical_probe_seconds}",
         "",
         "[policy]",
         "; آستانه‌ی شروع پاک‌سازی (درصد)",

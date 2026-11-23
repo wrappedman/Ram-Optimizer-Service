@@ -62,10 +62,51 @@
 ## نصب سریع (exe)
 
 1. **`build_exe.bat`** را دابل‌کلیک کنید (Python 3.9+ باید در PATH باشد).
-2. وارد پوشه‌ی **`release`** شوید و **`install_service.bat`** را دابل‌کلیک کنید
-   (در پنجره‌ی UAC گزینه‌ی Yes).
-3. تمام. سرویس با تأخیر بعد از بوت بالا می‌آید و در صورت کرش خودکار ری‌استارت
+2. سرویس ساخته می‌شود در **`build\RamOptimizerService\RamOptimizerService.exe`**.
+3. **`build\Manage-RamOptimizer.bat`** را دابل‌کلیک کنید و گزینه‌ی **۱ (نصب)**
+   را بزنید؛ در پنجره‌ی UAC گزینه‌ی Yes.
+4. تمام. سرویس با تأخیر بعد از بوت بالا می‌آید و در صورت کرش خودکار ری‌استارت
    می‌شود.
+
+### پوشه‌ی `build` و پنل مدیریت
+
+```
+build\
+  Manage-RamOptimizer.bat    ← همین را دابل‌کلیک کنید (نصب/حذف/وضعیت/لاگ)
+  RamOptimizerControl.ps1    منطق پنل (batch فقط پوسته است)
+  build_exe.bat              ساخت دوباره‌ی exe از سورس
+  RamOptimizerService\       خروجی PyInstaller (exe + فایل‌های همراه)
+```
+
+منوی `Manage-RamOptimizer.bat`:
+
+| گزینه | کار |
+|---|---|
+| ۱ | **نصب** سرویس (شروع خودکار با ویندوز، ری‌استارت در کرش) |
+| ۲ | **حذف** سرویس (تنظیمات و لاگ‌ها می‌مانند) |
+| ۳ | **وضعیت**: سرویس + `status.json` + `critical` |
+| ۴ | **لاگ‌ها**: آخرین خطوط `ram_optimizer.log` و `crash.log` |
+| ۵-۷ | اجرا / توقف / ری‌استارت |
+| ۸ | آزمون بی‌خطر (`test --dry-run`) |
+| ۹ | باز کردن/اعتبارسنجی `config.ini` |
+| ۱۰ | بازخوانی پیکربندی بدون ری‌استارت |
+| ۱۱ | توقف/ادامه‌ی پاک‌سازی (سرویس روشن می‌ماند) |
+| ۱۲ | عیب‌یابی (نسخه، دسترسی، وضعیت سرویس) |
+| ۱۳ | **بررسی سناریو**: هر یک دقیقه + فوری در وضعیت بحرانی |
+
+همان کارها بدون منو هم اجرا می‌شوند (مفید برای اسکریپت/CI):
+
+```bat
+build\Manage-RamOptimizer.bat install
+build\Manage-RamOptimizer.bat remove
+build\Manage-RamOptimizer.bat status
+build\Manage-RamOptimizer.bat logs -Lines 200
+build\Manage-RamOptimizer.bat doctor
+build\Manage-RamOptimizer.bat verify   # سناریوی هر یک دقیقه / بحرانی = فوری
+```
+
+نسخه‌ی ساخته‌شده در `build\build_info.json` و `build\SHA256SUMS.txt` ثبت می‌شود
+(commit، زمان بیلد، هش exe).
 
 ⚠️ پوشه‌ی `RamOptimizerService` را جابه‌جا یا حذف نکنید؛ exe از همان‌جا اجرا
 می‌شود. برای جابه‌جایی: `uninstall_service.bat` → جابه‌جا کردن → `install_service.bat`
@@ -121,8 +162,10 @@ RamOptimizerService.exe console
 
 ```ini
 [general]
-check_interval_seconds = 60
+check_interval_seconds = 60       ; هر یک دقیقه یک بررسی
 startup_delay_seconds = 60
+critical_poll_seconds = 5         ; در وضعیت بحرانی هر ۵ ثانیه بررسی کن
+critical_probe_seconds = 2        ; بین چرخه‌ها هر ۲ ثانیه ببین بحرانی شده یا نه
 
 [policy]
 trigger_percent = 75          ; آستانه‌ی شروع پاک‌سازی
@@ -130,6 +173,8 @@ reset_percent = 65            ; تا این درصد، حالت فعال می‌
 cooldown_seconds = 300        ; حداقل فاصله بین دو پاک‌سازی
 max_purges_per_hour = 6       ; سقف ساعتی (۰ = بی‌نهایت)
 min_available_mb = 0          ; اگر این قدر آزاد است، هرگز کاری نکن (۰ = خاموش)
+sustained_trigger_percent = 92 ; آستانه‌ی «بحرانی» — بلافاصله عمل کن
+sustained_polls = 1           ; چند بررسی پی‌درپی بالای آستانه = بحرانی
 
 [standby]
 purge = true
@@ -153,6 +198,55 @@ level = info                  ; debug | info | warning | error
 
 بدون نیاز به بیلد مجدد، بعد از تغییر: `Restart-Service RamOptimizerService`
 (یا `RamOptimizerService.exe service restart`).
+
+### «هر یک دقیقه» و «به‌محض بحرانی‌شدن، بلافاصله»
+
+این دقیقاً همان چیزی است که سرویس انجام می‌دهد:
+
+1. **چرخه‌ی عادی هر ۶۰ ثانیه**: `check_interval_seconds = 60`. در هر بررسی
+   حافظه خوانده می‌شود و اگر سیاست اجازه بدهد (۷۵٪ + hysteresis + cooldown)
+   یک پاس آزادسازی انجام می‌شود.
+2. **بحرانی ⇒ بدون منتظر ماندن**: اگر حافظه‌ی مصرفی به
+   `sustained_trigger_percent` (پیش‌فرض ۹۲٪) برسد، تصمیم **قبل از** بررسی
+   cooldown / سقف ساعتی / `min_available_mb` گرفته می‌شود و پاس آزادسازی همان
+   لحظه اجرا می‌شود.
+3. **حتی وسط خواب یک‌دقیقه‌ای**: سرویس هر `critical_probe_seconds` (پیش‌فرض
+   ۲ ثانیه) فقط یک `GlobalMemoryStatusEx` می‌خواند؛ اگر رم بحرانی شد، همان
+   لحظه بیدار می‌شود و چرخه را اجرا می‌کند — نه در ثانیه‌ی ۶۰. این یعنی حداکثر
+   تأخیر در بدترین حالت ۲ ثانیه است، بدون این‌که هر ثانیه هزینه‌ی پردازش بدهیم.
+4. بعد از یک چرخه‌ی بحرانی، فاصله‌ی بررسی به `critical_poll_seconds` (پیش‌فرض
+   ۵ ثانیه) کاهش می‌یابد؛ وقتی مصرف زیر آستانه آمد، به ۶۰ ثانیه برمی‌گردد.
+
+اثبات عملی روی همان ماشین (بدون تغییر سیستم):
+
+```bat
+build\RamOptimizerService\RamOptimizerService.exe verify --simulate-critical
+build\RamOptimizerService\RamOptimizerService.exe verify --watch 60
+```
+
+و شواهد در لاگ (گزینه‌ی ۴ پنل):
+
+```
+حلقه‌ی بهینه‌سازی شروع شد | بررسی عادی هر 60 ثانیه | در وضعیت بحرانی (≥92%) هر 5 ثانیه (پایش هر 2 ثانیه)
+حافظه در فاصله‌ی بین دو چرخه بحرانی شد (≥92%) — چرخه‌ی بعدی همین حالا اجرا می‌شود (بدون انتظار برای 60 ثانیه).
+وضعیت بحرانی: مصرف 93.8% ≥ 92% (آستانه‌ی عادی 75%) — اجرای فوری.
+پاک‌سازی انجام شد | ... Working Set آزادشده: 3648MB ... مصرف: 93.8% → 71.5%
+```
+
+در لاگ این سه خط را می‌بینید:
+
+```
+حلقه‌ی بهینه‌سازی شروع شد | بررسی عادی هر 60 ثانیه | در وضعیت بحرانی (≥92%) هر 5 ثانیه
+وضعیت بحرانی: مصرف 93.2% ≥ 92% (آستانه‌ی عادی 75%) — اجرای فوری.
+پاک‌سازی انجام شد | ... آزادشده ...
+```
+
+`status.json` هم کلید `"critical": true|false` را دارد تا از بیرون قابل پایش باشد.
+«توقف موقت» (`pause`) بر حالت بحرانی هم اولویت دارد: تا `resume` نزنید کاری
+انجام نمی‌شود.
+
+رفتار با تست‌های `tests/test_critical_mode.py` و `tests/test_runner_status.py`
+قفل شده است (زمان‌بندی ۶۰ ثانیه، تصمیم فوری، بازگشت به ۶۰ ثانیه).
 
 ### تنظیمات پیشنهادی
 
@@ -179,6 +273,11 @@ RamOptimizerService.exe test --force     اجرای دستی
 RamOptimizerService.exe console          اجرای دائمی در پیش‌زمینه
 RamOptimizerService.exe service install|remove|start|stop|restart|pause|continue|query|repair
 RamOptimizerService.exe log --lines 50   نمایش انتهای لاگ
+RamOptimizerService.exe pause            توقف موقت پاک‌سازی در سرویس در حال اجرا
+RamOptimizerService.exe resume           ادامه‌ی پاک‌سازی
+RamOptimizerService.exe reload           بازخوانی config.ini بدون ری‌استارت
+RamOptimizerService.exe verify           بررسی عملی سناریوی هر یک دقیقه / بحرانی-فوری
+                                         (--simulate-critical، --watch 60)
 ```
 
 اگر از سورس اجرا می‌کنید، همان دستورها با `python -m ramopt` یا `ramopt` در دسترس‌اند.
@@ -221,7 +320,7 @@ python -m venv .venv
 .venv\Scripts\activate            # ویندوز (لینوکس: source .venv/bin/activate)
 pip install -r requirements-dev.txt
 
-pytest -q                          # ۷۰+ تست (بخش ویندوزی روی لینوکس skip می‌شود)
+pytest -q                          # ۱۰۰+ تست (بخش ویندوزی روی لینوکس skip می‌شود)
 ruff check . && ruff format --check .
 mypy ramopt
 
@@ -243,6 +342,7 @@ ramopt/
   status.py         status.json
   logging_setup.py  لاگ چرخشی + Event Log + crash
   cli.py            خط فرمان
+build/              پنل مدیریت ویندوز + محل خروجی exe (Manage-RamOptimizer.bat)
 tests/              pytest (FakeApi کامل، بدون نیاز به ویندوز برای سیاست‌ها)
 installer/          اسکریپت Inno Setup
 .github/workflows/  CI (لینوکس + ویندوز واقعی + بیلد exe)

@@ -31,20 +31,33 @@ build_exe.bat        :: needs Python 3.9+ in PATH
 ```
 
 The script creates a virtual environment, installs build requirements, runs the
-test suite, and produces `release\RamOptimizerService\RamOptimizerService.exe`
+test suite, and produces `build\RamOptimizerService\RamOptimizerService.exe`
 (a **onedir** build — a onefile exe regularly fails to answer the Service
 Control Manager in time).
 
-### Install the service
+### Install the service — one file does everything
 
 ```bat
-cd release
-install_service.bat     :: self-elevates, installs as delayed-auto, starts it
+build\Manage-RamOptimizer.bat      :: menu: install / remove / status / logs / ...
+build\Manage-RamOptimizer.bat install
+build\Manage-RamOptimizer.bat remove
+build\Manage-RamOptimizer.bat status
+build\Manage-RamOptimizer.bat logs -Lines 200
 ```
 
-The service is registered with three recovery actions, so Windows restarts it
-if it crashes. Uninstall with `uninstall_service.bat` (it also offers to delete
-`%ProgramData%\RamOptimizer`).
+`build\` contains:
+
+| File | Purpose |
+|---|---|
+| `Manage-RamOptimizer.bat` | the control panel (double-click it) |
+| `RamOptimizerControl.ps1` | its logic — batch is only a thin launcher |
+| `build_exe.bat` | rebuilds the exe from source |
+| `RamOptimizerService\` | PyInstaller output (the exe and its files) |
+| `build_info.json`, `SHA256SUMS.txt` | what was built, from which commit, with which hash |
+
+Menu items: 1 install, 2 remove, 3 status, 4 logs, 5-7 start/stop/restart,
+8 dry run, 9 config file, 10 reload config, 11 pause/resume trimming,
+12 diagnostics, 13 verify the 1-minute/critical behaviour.
 
 ### Or use the installer
 
@@ -82,12 +95,46 @@ Every `check_interval_seconds` (default 60 s) it reads the real memory state
 | `min_process_ws_mb` | 20 | ignore tiny processes (no benefit, pure syscalls) |
 | `max_processes` | 64 | trim the biggest N processes first |
 | `exclude` / `exclude_patterns` | system-critical + AV | never touch these |
+| `sustained_trigger_percent` | 92 | **critical**: act at once, ignoring cooldown |
+| `sustained_polls` | 1 | consecutive polls above critical before acting |
+| `critical_poll_seconds` | 5 | poll interval while memory stays critical |
+| `critical_probe_seconds` | 2 | cheap mid-wait probe so a critical spike is not missed |
 | `skip_when_fullscreen` | true | games, presentations, locked screen |
 | `skip_on_battery` | false | jump out on battery |
 | `quiet_hours` | empty | e.g. `23:00-06:00` |
 
 Plus an exponential **backoff** when a run yields almost nothing, and a
 **startup delay** so the service does not fight the boot storm.
+
+### One-minute cycle, immediate action at the critical point
+
+* Normal path: one cycle every `check_interval_seconds` (60 s).
+* Critical path: as soon as used RAM reaches `sustained_trigger_percent` (92 %),
+  the release pass runs **in that same cycle** — the cooldown, the hourly cap and
+  `min_available_mb` are bypassed (an explicit `pause` still wins).
+* Between cycles the loop only calls `GlobalMemoryStatusEx` every
+  `critical_probe_seconds` (2 s). If RAM turns critical while the service is
+  sleeping its one-minute wait, it wakes up immediately instead of waiting for
+  the next minute.
+* After a critical pass it polls every `critical_poll_seconds` (5 s) until memory
+  comes back below the threshold, then returns to 60 s.
+
+Verify it on your own machine — nothing on the system is changed:
+
+```bat
+RamOptimizerService.exe verify --simulate-critical
+RamOptimizerService.exe verify --watch 60
+```
+
+The log then shows, in order:
+
+```
+حلقه‌ی بهینه‌سازی شروع شد | بررسی عادی هر 60 ثانیه | در وضعیت بحرانی (≥92%) هر 5 ثانیه (پایش هر 2 ثانیه)
+حافظه در فاصله‌ی بین دو چرخه بحرانی شد (≥92%) — چرخه‌ی بعدی همین حالا اجرا می‌شود ...
+وضعیت بحرانی: مصرف 93.8% ≥ 92% (آستانه‌ی عادی 75%) — اجرای فوری.
+```
+
+Covered by `tests/test_scenario_logs.py` and `tests/test_critical_mode.py`.
 
 ---
 
@@ -110,6 +157,8 @@ RamOptimizerService.exe test [--dry-run] [--force] [--json]
 RamOptimizerService.exe console | once
 RamOptimizerService.exe service install|remove|start|stop|restart|pause|continue|query|repair
 RamOptimizerService.exe log --lines 50
+RamOptimizerService.exe pause | resume | reload
+RamOptimizerService.exe verify [--simulate-critical] [--watch N]
 ```
 
 From a source checkout, `python -m ramopt …` and the `ramopt` entry point expose

@@ -4,6 +4,41 @@
 قالب بر اساس [Keep a Changelog](https://keepachangelog.com/fa/1.1.0/) و
 نسخه‌بندی بر اساس [SemVer](https://semver.org/lang/fa/).
 
+## [Unreleased]
+
+### افزوده‌ها
+
+- **حالت بحرانی (فوری)**: با `sustained_trigger_percent` (پیش‌فرض ۹۲٪) چرخه‌ی
+  پاک‌سازی **در همان بررسی** اجرا می‌شود و cooldown/سقف ساعتی/`min_available_mb`
+  دور زده می‌شوند. تا زیر آستانه بیاید، بررسی هر `critical_poll_seconds`
+  (۵ ثانیه) است.
+- **بیدار شدن زودهنگام بین چرخه‌ها**: هر `critical_probe_seconds` (۲ ثانیه) یک
+  خواندن سبک حافظه؛ اگر وسط خواب یک‌دقیقه‌ای رم بحرانی شد، همان لحظه اقدام
+  می‌شود (حداکثر ۲ ثانیه تأخیر، نه ۶۰).
+- **دستور `verify`**: بررسی عملی سناریو روی همان ماشین
+  (`ramopt verify --simulate-critical --watch 60`)، بدون تغییر سیستم.
+- **`command.json`**: `ramopt pause` / `resume` / `reload` واقعاً توسط سرویسِ
+  در حال اجرا اعمال می‌شوند (قبلاً هیچ کانالی برای این کارها نبود و
+  `reload` وجود نداشت).
+- **`critical` در `status.json`** و `config_revision` برای پایش بیرونی.
+- **پوشه‌ی `build/`** با پنل مدیریت تک‌فایلی
+  (`Manage-RamOptimizer.bat` + `RamOptimizerControl.ps1`) برای نصب، حذف،
+  وضعیت، لاگ، ری‌استارت، reload، pause/resume، عیب‌یابی و verify؛ بیلد exe هم
+  در همان مسیر (`build\RamOptimizerService\…`) گذاشته می‌شود.
+- `build\build_info.json` و `build\SHA256SUMS.txt` برای هر بیلد.
+
+### اصلاح باگ‌ها
+
+- **کامنت درون‌خطی در `config.ini`**: قالب مستندشده در README
+  (`trigger_percent = 75 ; آستانه`) به‌عنوان «عدد صحیح نامعتبر» رد می‌شد.
+- **ارقام فارسی/عربی**: `trigger_percent = ۸۰` رد می‌شد؛ ورودی‌ها اکنون
+  NFKC-normalize می‌شوند.
+- **آرگومان قدیمی `install --startup auto`**: به `service install --startup
+  auto install` تبدیل می‌شد و شکست می‌خورد. نرمال‌سازی مشترک شد.
+- **تداخل نام `pause`**: زیرفرمان جدید `pause` توسط میان‌بر قدیمی بلعیده می‌شد.
+- `OptimizerRunner.run_once()` اکنون `CycleResult` را برمی‌گرداند (برای تست و
+  ابزارها) و خطا را `None`.
+
 ## [2.0.0] — 2026-11-23
 
 بازنویسی کامل بر اساس بازبینی کد (`docs/CODE_REVIEW_fa.md`). رفتار پیش‌فرض

@@ -271,3 +271,42 @@ PyInstaller می‌شود. باید `requirements-dev.txt` جدا شود. ضمن
 | B18–B28 | ✅ | شمارش دسترسی رد‌شده، `pids`/`attr` در psutil، هندلر امن stderr، لاگ مسیر، preshutdown/pause، پیام نصب شفاف، نسخه‌بندی، license/CHANGELOG/README انگلیسی، پاک‌سازی ProgramData در uninstall، CI |
 | O1–O12 | ✅ | همه‌ی بهینه‌سازی‌ها (فاز ۱–۵) اجرا شد |
 | حرفه‌ای‌سازی | ⚠️ جزئی | config.ini، status.json، Event Log، CLI، installer، CI و تست اضافه شد؛ **tray آیکون** طبق تصمیم شما اضافه **نشد**؛ امضای کد نیازمند گواهی از طرف شماست |
+---
+
+## ۶) بازبینی دوم (پس از v2.0.0) و سناریوی عملیاتی
+
+### باگ‌هایی که در بازبینی دوم پیدا و رفع شد
+
+| # | باگ | اثر واقعی | رفع |
+|---|---|---|---|
+| R1 | کامنت درون‌خطی در `config.ini` (`trigger_percent = 75 ; آستانه`) رد می‌شد | همان قالبی که README نشان می‌دهد خطای «عدد صحیح نامعتبر» می‌داد و مقدار پیش‌فرض جای آن می‌نشست | `inline_comment_prefixes=(";", "#")` در `ConfigParser` |
+| R2 | ارقام فارسی/عربی (`۸۰`) پذیرفته نمی‌شد | کاربر فارسی‌زبان آستانه را «تنظیم» می‌کرد و هیچ اثری نداشت | `normalize_number_text()` (NFKC + translate) در `_get_int` |
+| R3 | `install --startup auto` (فرم قدیمی مستندشده) به `service install --startup auto install` تبدیل می‌شد | نصب با پیام خطای گمراه‌کننده شکست می‌خورد | `cli.normalize_argv()` مشترک، بدون تکرار `install` |
+| R4 | زیرفرمان جدید `pause` توسط میان‌بر قدیمی `pause → service pause` بلعیده می‌شد | `ramopt pause` به‌جای نوشتن `command.json` سرویس را pause می‌کرد | نام‌های میان‌بر فقط افعال واقعی SCM |
+| R5 | سرویس هیچ کانالی برای «پیکربندی را دوباره بخوان» نداشت (README خلافش را می‌گفت) | تغییر `config.ini` تا ری‌استارت اثری نداشت | پروتکل `command.json` + `ramopt reload` |
+
+### سناریوی درخواستی: هر یک دقیقه، و فوری در نقطه‌ی بحرانی
+
+| نیاز | پیاده‌سازی | اثبات |
+|---|---|---|
+| پاس آزادسازی هر یک دقیقه | `check_interval_seconds = 60` + `OptimizerRunner.next_interval()` | `tests/test_critical_mode.py::test_runner_uses_sixty_seconds_when_idle` |
+| به‌محض بحرانی شدن، همان لحظه (نه دقیقه‌ی بعد) | `OptimizerEngine.decide()` شاخه‌ی `critical` را **قبل از** هیسترزیس/cooldown/سقف ساعتی/`min_available_mb` بررسی می‌کند و `Decision(critical=True)` می‌دهد | `test_critical_*` (۴ تست) |
+| حتی وسط خواب یک‌دقیقه‌ای | `OptimizerRunner.wait_next()` هر `critical_probe_seconds` (۲ ثانیه) فقط `GlobalMemoryStatusEx` می‌خواند و در صورت عبور از آستانه بیدار می‌شود | `tests/test_scenario_logs.py::test_loop_wakes_up_immediately_when_memory_turns_critical` (ترتیب بیداری‌ها: ۲،۲،… نه ۶۰) |
+| بررسی سریع‌تر تا پایین آمدن | `critical_poll_seconds = 5` بعد از چرخه‌ی بحرانی | `test_runner_switches_to_critical_interval` |
+| قابل مشاهده بودن | `status.json → "critical"`، لاگ رویدادها، دستور `ramopt verify` | `tests/test_scenario_logs.py` (بررسی متن لاگ) |
+
+`pause` دستی همیشه بر حالت بحرانی اولویت دارد (اگر مدیر سرویس آگاهانه خاموش
+کرده باشد، سرویس خودسرانه اقدام نمی‌کند).
+
+### پوشه‌ی `build/`
+
+| فایل | نقش |
+|---|---|
+| `Manage-RamOptimizer.bat` | پنل تک‌فایلی: نصب / حذف / وضعیت / لاگ + ۹ کار دیگر |
+| `RamOptimizerControl.ps1` | منطق پنل (batch فقط لانچر است؛ پارس UTF-8 و گرفتن exit code در batch خالص شکننده است) |
+| `build_exe.bat` | بیلد مجدد exe از سورس (تست‌ها → PyInstaller → کپی به `build\`) |
+| `RamOptimizerService\` | خروجی PyInstaller (git-ignore؛ در CI ساخته و آپلود می‌شود) |
+
+تست‌های `tests/test_build_folder.py` تضمین می‌کنند: فایل‌ها وجود دارند، exe در
+git نمی‌رود ولی پنل می‌رود، و **هر دستوری که پنل به exe می‌دهد زیرفرمان واقعی
+argparse است** (جلوگیری از خرابی خاموش پس از تغییر CLI).
