@@ -65,7 +65,16 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Pytest (including Windows-only tests)
-        run: pytest -q
+        run: pytest -q --tb=short 2>&1 | Tee-Object -FilePath pytest-out.txt; exit $LASTEXITCODE
+        shell: pwsh
+
+      - name: Publish failure as annotation (readable without log access)
+        if: failure()
+        shell: pwsh
+        run: |
+          $lines = Get-Content pytest-out.txt | Select-String -Pattern '^(FAILED|E  |assert)' | Select-Object -First 12
+          foreach ($line in $lines) { Write-Output "::error::$($line.Line)" }
+          if (-not $lines) { Get-Content pytest-out.txt -Tail 40 | ForEach-Object { Write-Output "::error::$_" } }
 
       - name: Build exe
         run: |
