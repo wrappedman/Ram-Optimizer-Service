@@ -72,6 +72,50 @@ def _run(args: list[str]) -> tuple[int, str]:
         return EXIT_ERROR, str(exc)
 
 
+def _apply_service_settings(hs) -> None:
+    """تنظیمات مشترک install/repair: توضیحات، شروع تأخیری، ری‌استارت خودکار."""
+    import win32service
+
+    win32service.ChangeServiceConfig2(
+        hs, win32service.SERVICE_CONFIG_DESCRIPTION, SERVICE_DESCRIPTION
+    )
+    # شروع با تأخیر: سرویس‌های حیاتی سیستم اول بالا می‌آیند
+    try:
+        win32service.ChangeServiceConfig2(
+            hs, win32service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO, True
+        )
+    except win32service.error as exc:  # pragma: no cover
+        _log(
+            f"warning: could not set delayed auto-start: {exc}. Continuing with normal auto-start."
+        )
+
+    # self-healing: اگر سرویس کرش کرد، ویندوز دوباره بالا بیاوردش
+    try:
+        win32service.ChangeServiceConfig2(
+            hs,
+            win32service.SERVICE_CONFIG_FAILURE_ACTIONS,
+            {
+                "ResetPeriod": 24 * 60 * 60,  # reset the failure counter daily
+                "RebootMsg": "",
+                "Command": "",
+                "Actions": [
+                    (SC_ACTION_RESTART, 5_000),
+                    (SC_ACTION_RESTART, 30_000),
+                    (SC_ACTION_RESTART, 120_000),
+                ],
+            },
+        )
+    except win32service.error as exc:  # pragma: no cover
+        _log(f"warning: could not set failure actions: {exc}")
+    # failure actions روی «توقف با کد خطا» (نه فقط کرش) هم اعمال شود
+    try:
+        win32service.ChangeServiceConfig2(
+            hs, win32service.SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, True
+        )
+    except (win32service.error, AttributeError):  # pragma: no cover
+        pass
+
+
 def install(wait_seconds: int = 0) -> int:
     if sys.platform != "win32":
         _log("this command only works on Windows.")
@@ -124,44 +168,7 @@ def install(wait_seconds: int = 0) -> int:
             None,
         )
         try:
-            win32service.ChangeServiceConfig2(
-                hs, win32service.SERVICE_CONFIG_DESCRIPTION, SERVICE_DESCRIPTION
-            )
-            # شروع با تأخیر: سرویس‌های حیاتی سیستم اول بالا می‌آیند
-            try:
-                win32service.ChangeServiceConfig2(
-                    hs, win32service.SERVICE_CONFIG_DELAYED_AUTO_START_INFO, True
-                )
-            except win32service.error as exc:  # pragma: no cover
-                _log(
-                    f"warning: could not set delayed auto-start: {exc}. Continuing with normal auto-start."
-                )
-
-            # self-healing: اگر سرویس کرش کرد، ویندوز دوباره بالا بیاوردش
-            try:
-                win32service.ChangeServiceConfig2(
-                    hs,
-                    win32service.SERVICE_CONFIG_FAILURE_ACTIONS,
-                    {
-                        "ResetPeriod": 24 * 60 * 60,  # reset the failure counter daily
-                        "RebootMsg": "",
-                        "Command": "",
-                        "Actions": [
-                            (SC_ACTION_RESTART, 5_000),
-                            (SC_ACTION_RESTART, 30_000),
-                            (SC_ACTION_RESTART, 120_000),
-                        ],
-                    },
-                )
-            except win32service.error as exc:  # pragma: no cover
-                _log(f"warning: could not set failure actions: {exc}")
-            # failure actions روی «توقف با کد خطا» (نه فقط کرش) هم اعمال شود
-            try:
-                win32service.ChangeServiceConfig2(
-                    hs, win32service.SERVICE_CONFIG_FAILURE_ACTIONS_FLAG, True
-                )
-            except (win32service.error, AttributeError):  # pragma: no cover
-                pass
+            _apply_service_settings(hs)
         finally:
             win32service.CloseServiceHandle(hs)
     finally:
@@ -467,19 +474,7 @@ def repair() -> int:
             None,
             SERVICE_DISPLAY_NAME,
         )
-        win32service.ChangeServiceConfig2(
-            hs, win32service.SERVICE_CONFIG_DESCRIPTION, SERVICE_DESCRIPTION
-        )
-        win32service.ChangeServiceConfig2(
-            hs,
-            win32service.SERVICE_CONFIG_FAILURE_ACTIONS,
-            {
-                "ResetPeriod": 86400,
-                "RebootMsg": "",
-                "Command": "",
-                "Actions": [(SC_ACTION_RESTART, 5_000), (SC_ACTION_RESTART, 30_000)],
-            },
-        )
+        _apply_service_settings(hs)
         _log(f"service repaired: {image_path}")
         _register_event_source()
         return EXIT_OK

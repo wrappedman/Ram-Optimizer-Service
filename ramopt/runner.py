@@ -138,7 +138,12 @@ class OptimizerRunner:
             "total_mb": None,
         }
         if result.action is Action.OPTIMIZED:
-            self.status.counters["purges"] = int(self.status.counters.get("purges", 0)) + 1
+            if result.lightweight:
+                self.status.counters["lightweight_passes"] = (
+                    int(self.status.counters.get("lightweight_passes", 0)) + 1
+                )
+            else:
+                self.status.counters["purges"] = int(self.status.counters.get("purges", 0)) + 1
             self.status.counters["freed_mb"] = round(
                 float(self.status.counters.get("freed_mb", 0.0)) + result.freed_mb, 1
             )
@@ -149,6 +154,7 @@ class OptimizerRunner:
             ).isoformat(timespec="seconds")
         self.status.next_allowed_at = next_allowed
         self.status.extra["critical"] = result.critical
+        self.status.extra["lightweight"] = result.lightweight
         self.status.write()
 
         if self._cycles % HEARTBEAT_EVERY_N_CYCLES == 0:

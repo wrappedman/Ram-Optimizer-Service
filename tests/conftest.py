@@ -234,6 +234,7 @@ def base_config() -> Config:
         skip_when_fullscreen=True,
         skip_on_battery=False,
         quiet_hours="",
+        periodic_trim_enabled=False,
     )
 
 

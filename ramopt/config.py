@@ -134,6 +134,15 @@ class Config:
     min_free_mb_after_trim: int = 512
     flush_modified_list: bool = False
 
+    # --- periodic lightweight pass ---
+    #: هر چرخه (پیش‌فرض هر ۶۰ ثانیه) یک پاس سبک انجام بده، حتی اگر زیر آستانه
+    #: باشیم. این پاس فقط Working Set را trim می‌کند و Standby List را دست نمی‌زند.
+    periodic_trim_enabled: bool = True
+    #: سقف پروسه در پاس سبک (کوچک نگه دارید تا روی سیستم اثر نگذارد).
+    periodic_trim_max_processes: int = 8
+    #: پروسه‌های کوچک‌تر از این مقدار در پاس سبک دست نمی‌خورند.
+    periodic_trim_min_process_ws_mb: int = 64
+
     # --- targets ---
     #: پروسه‌های کوچک‌تر از این مقدار دست نمی‌خورند.
     min_process_ws_mb: int = 20
@@ -353,6 +362,24 @@ def config_from_parser(
             minimum=0,
             maximum=1_048_576,
         ),
+        sustained_trigger_percent=_get_int(
+            parser,
+            "policy",
+            "sustained_trigger_percent",
+            defaults.sustained_trigger_percent,
+            issues,
+            minimum=0,
+            maximum=99,
+        ),
+        sustained_polls=_get_int(
+            parser,
+            "policy",
+            "sustained_polls",
+            defaults.sustained_polls,
+            issues,
+            minimum=1,
+            maximum=60,
+        ),
         purge_standby_list=_get_bool(
             parser, "standby", "purge", defaults.purge_standby_list, issues
         ),
@@ -367,6 +394,27 @@ def config_from_parser(
         ),
         flush_modified_list=_get_bool(
             parser, "standby", "flush_modified_list", defaults.flush_modified_list, issues
+        ),
+        periodic_trim_enabled=_get_bool(
+            parser, "periodic", "enabled", defaults.periodic_trim_enabled, issues
+        ),
+        periodic_trim_max_processes=_get_int(
+            parser,
+            "periodic",
+            "max_processes",
+            defaults.periodic_trim_max_processes,
+            issues,
+            minimum=0,
+            maximum=256,
+        ),
+        periodic_trim_min_process_ws_mb=_get_int(
+            parser,
+            "periodic",
+            "min_process_ws_mb",
+            defaults.periodic_trim_min_process_ws_mb,
+            issues,
+            minimum=0,
+            maximum=1_048_576,
         ),
         min_process_ws_mb=_get_int(
             parser,
@@ -509,6 +557,14 @@ def default_config_text(config: Config | None = None) -> str:
         f"min_free_mb_after_trim = {cfg.min_free_mb_after_trim}",
         "; write modified pages to disk (off by default: it is slow)",
         f"flush_modified_list = {'true' if cfg.flush_modified_list else 'false'}",
+        "",
+        "[periodic]",
+        "; lightweight trim every cycle, even below trigger_percent (low impact)",
+        f"enabled = {'true' if cfg.periodic_trim_enabled else 'false'}",
+        "; max processes to trim in a periodic lightweight pass (0 = unlimited)",
+        f"max_processes = {cfg.periodic_trim_max_processes}",
+        "; only trim processes whose working set is at least this large (MB)",
+        f"min_process_ws_mb = {cfg.periodic_trim_min_process_ws_mb}",
         "",
         "[targets]",
         "; processes below this working set (MB) are left alone",

@@ -197,3 +197,73 @@ def test_min_available_mb_goal(base_config, fake_api, fake_provider, clock):
 
     decision = engine.decide(reading(80.0, available_gb=2.0))
     assert decision.should_optimize is True
+
+
+# ---------------------------------------------------------------------------
+# پاس سبک دوره‌ای (درخواست: هر یک دقیقه، حتی زیر آستانه، سبک و کم‌اثر)
+# ---------------------------------------------------------------------------
+
+
+def test_periodic_lightweight_pass_runs_below_trigger(fake_api, fake_provider, clock):
+    config = Config(
+        startup_delay_seconds=0,
+        trigger_percent=75,
+        reset_percent=65,
+        cooldown_seconds=300,
+        max_purges_per_hour=6,
+        min_available_mb=0,
+        purge_standby_list=True,
+        min_free_mb_after_trim=0,
+        min_process_ws_mb=20,
+        max_processes=0,
+        periodic_trim_enabled=True,
+        periodic_trim_max_processes=4,
+        periodic_trim_min_process_ws_mb=64,
+    )
+    engine = make_engine(config, fake_api, fake_provider, clock)
+    decision = engine.decide(reading(40.0))
+    assert decision.should_optimize is True
+    assert decision.lightweight is True
+    assert decision.action is Action.OPTIMIZED
+
+
+def test_periodic_lightweight_pass_respects_pause(fake_api, fake_provider, clock):
+    config = Config(
+        startup_delay_seconds=0,
+        trigger_percent=75,
+        reset_percent=65,
+        periodic_trim_enabled=True,
+    )
+    engine = make_engine(config, fake_api, fake_provider, clock)
+    engine.pause("test")
+    decision = engine.decide(reading(40.0))
+    assert decision.action is Action.SKIPPED
+
+
+def test_periodic_lightweight_pass_does_not_consume_heavy_cooldown(fake_api, fake_provider, clock):
+    from conftest import set_process_sizes
+
+    config = Config(
+        startup_delay_seconds=0,
+        trigger_percent=75,
+        reset_percent=65,
+        cooldown_seconds=300,
+        max_purges_per_hour=6,
+        min_available_mb=0,
+        purge_standby_list=True,
+        min_free_mb_after_trim=0,
+        min_process_ws_mb=20,
+        max_processes=0,
+        periodic_trim_enabled=True,
+        periodic_trim_max_processes=4,
+        periodic_trim_min_process_ws_mb=20,
+    )
+    fake_api.used_bytes = int(4 * GB)  # زیر آستانه
+    set_process_sizes(fake_api, fake_provider, {400: 200})
+    engine = make_engine(config, fake_api, fake_provider, clock)
+    result = engine.run_cycle()
+    assert result.action is Action.OPTIMIZED
+    assert result.purge is not None and result.purge.purged is False
+    assert "lightweight" in (result.purge.skipped_reason or "")
+    assert engine.last_purge_at is None
+    assert engine.total_purges == 0

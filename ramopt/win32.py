@@ -189,8 +189,9 @@ class SYSTEM_POWER_STATUS(ctypes.Structure):
 class MemorySnapshot:
     """عکس لحظه‌ای از حافظه — همه بر حسب بایت.
 
-    ``used_percent`` همان عدد «Memory» در Task Manager است:
-    ``(total - available) / total`` که standby/cache را هم شامل می‌شود.
+    ``used_percent`` بر اساس GlobalMemoryStatusEx محاسبه می‌شود:
+    ``(total - available) / total``. این مقدار فشار عملی حافظه را نشان می‌دهد
+    (هرچه ``available`` کمتر باشد، عدد بالاتر می‌رود).
     ``commit_percent`` فشار واقعی commit است (چیزی که باعث خطای Out of Memory
     می‌شود) و با پاک‌سازی کش تغییر نمی‌کند؛ به همین دلیل عدد صادقانه‌تری برای
     لاگ است.

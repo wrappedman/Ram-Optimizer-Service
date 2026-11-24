@@ -139,3 +139,35 @@ def test_corrupt_ini_does_not_crash():
     except configparser.Error:
         return  # رفتار مورد انتظار: خطای قابل گرفتن
     config_from_parser(parser)  # یا با موفقیت پیش‌فرض‌ها
+
+
+def test_sustained_critical_settings_are_read_from_ini():
+    parser = parser_from(
+        """
+        [policy]
+        sustained_trigger_percent = 95
+        sustained_polls = 3
+        """
+    )
+    issues = []
+    config = config_from_parser(parser, issues)
+    assert config.sustained_trigger_percent == 95
+    assert config.sustained_polls == 3
+    assert issues == []
+
+
+def test_periodic_settings_are_read_from_ini():
+    parser = parser_from(
+        """
+        [periodic]
+        enabled = false
+        max_processes = 4
+        min_process_ws_mb = 128
+        """
+    )
+    issues = []
+    config = config_from_parser(parser, issues)
+    assert config.periodic_trim_enabled is False
+    assert config.periodic_trim_max_processes == 4
+    assert config.periodic_trim_min_process_ws_mb == 128
+    assert issues == []
