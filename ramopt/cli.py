@@ -186,7 +186,8 @@ def cmd_status(args) -> int:
     )
     row(
         "counters",
-        f"{counters.get('purges', 0)} passes | "
+        f"{counters.get('purges', 0)} heavy passes | "
+        f"{counters.get('lightweight_passes', 0)} light passes | "
         f"{counters.get('freed_mb', 0)} MB freed | "
         f"{counters.get('errors', 0)} errors | "
         f"{counters.get('cycles', 0)} cycles",
@@ -636,6 +637,11 @@ def _grouped(data: dict) -> dict[str, dict]:
             "sustained_polls",
         ],
         "standby": ["purge_standby_list", "min_free_mb_after_trim", "flush_modified_list"],
+        "periodic": [
+            "periodic_trim_enabled",
+            "periodic_trim_max_processes",
+            "periodic_trim_min_process_ws_mb",
+        ],
         "targets": ["min_process_ws_mb", "max_processes", "exclude", "exclude_patterns"],
         "safety": ["skip_when_fullscreen", "skip_on_battery", "quiet_hours"],
         "logging": ["log_level"],

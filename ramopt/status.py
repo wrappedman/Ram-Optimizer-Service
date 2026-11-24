@@ -50,7 +50,13 @@ class StatusWriter:
         self.last_action: str | None = None
         self.last_reason: str | None = None
         self.memory: dict[str, Any] = {}
-        self.counters: dict[str, Any] = {"purges": 0, "freed_mb": 0.0, "errors": 0, "cycles": 0}
+        self.counters: dict[str, Any] = {
+            "purges": 0,
+            "lightweight_passes": 0,
+            "freed_mb": 0.0,
+            "errors": 0,
+            "cycles": 0,
+        }
         self.recent_errors: list[dict[str, str]] = []
         self.next_allowed_at: str | None = None
         self.extra: dict[str, Any] = {}

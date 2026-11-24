@@ -75,7 +75,7 @@ def test_status_reads_json(isolated_data_dir, capsys):
 
     assert main(["status"]) == 0
     out = capsys.readouterr().out
-    assert "optimized" in out and "2 passes" in out
+    assert "optimized" in out and "2 heavy passes" in out
 
     capsys.readouterr()
     assert main(["status", "--json"]) == 0

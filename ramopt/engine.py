@@ -60,6 +60,8 @@ class Decision:
     should_optimize: bool = False
     #: وضعیت بحرانی است → چرخه‌ی بعدی نباید یک دقیقه صبر کند
     critical: bool = False
+    #: پاس سبک دوره‌ای: فقط trim محدود، بدون purge standby / بدون محدودیت cooldown
+    lightweight: bool = False
     details: dict[str, object] = field(default_factory=dict)
 
 
@@ -82,6 +84,7 @@ class CycleResult:
     purge: memory_mod.PurgeReport | None = None
     duration_ms: float = 0.0
     critical: bool = False
+    lightweight: bool = False
     environment: dict[str, object] = field(default_factory=dict)
 
     @property
@@ -107,6 +110,7 @@ class CycleResult:
             "freed_mb": round(self.freed_mb, 1),
             "duration_ms": round(self.duration_ms, 1),
             "critical": self.critical,
+            "lightweight": self.lightweight,
             "environment": self.environment,
             "trim": self.trim.as_dict() if self.trim else None,
             "purge": self.purge.as_dict() if self.purge else None,
@@ -210,9 +214,11 @@ class OptimizerEngine:
     def _update_critical(self, used: float) -> bool:
         """به‌روزرسانی شمارنده‌ی «وضعیت بحرانی».
 
-        «مصرف» در ویندوز شامل کش (standby) است، پس عدد ۹۲٪ می‌تواند فقط یک
-        کش بزرگ باشد. برای همین علاوه بر آستانه، «حداقل حافظه‌ی آزاد» هم باید
-        کم باشد؛ وگرنه هیچ‌وقت به حالت بحرانی نمی‌رسیم (بهتر از اجرای بی‌فایده).
+        مصرف از GlobalMemoryStatusEx محاسبه می‌شود: ``(total - available) / total``.
+        در ویندوز مقدار ``available`` شامل حافظه‌ی آزاد و بخشی از حافظه‌ی قابل
+        استفاده‌ی مجدد است؛ بنابراین این درصد یک شاخص فشار عملی است، نه «حافظه‌ی
+        بلااستفاده». آستانه‌ی بحرانی بر اساس همین درصد و تعداد بررسی‌های متوالی
+        اعمال می‌شود.
         """
         config = self.config
         if config.sustained_trigger_percent <= 0:
@@ -307,23 +313,44 @@ class OptimizerEngine:
                 used,
                 config.reset_percent,
             )
-            return Decision(Action.NOOP, "usage below the reset threshold", self.mode)
+            # زیر آستانه ریست: پاس سنگین لازم نیست، ولی پاس سبک دوره‌ای ممکن است اجرا شود.
 
+        # --- محدودیت‌های محیطی -----------------------------------------
+        block_reason, details = self._blocking_environment()
+        if block_reason:
+            return Decision(
+                Action.SKIPPED, block_reason, self.mode, details={"environment": details}
+            )
+
+        # --- پاس سبک دوره‌ای (هر چرخه، فارغ از بحرانی/غیربحرانی) ------
+        # درخواست کاربر: هر یک دقیقه یک پاس سبک انجام شود تا روی ویندوز اثر منفی نگذارد.
+        # این پاس cooldown/سقف ساعتی سنگین را دور می‌زند، ولی محیط ایمن را محترم می‌شمارد.
         if self.mode is Mode.IDLE:
+            if config.periodic_trim_enabled:
+                return Decision(
+                    Action.OPTIMIZED,
+                    f"periodic lightweight pass (usage {used:.1f}% < trigger {config.trigger_percent}%)",
+                    self.mode,
+                    should_optimize=True,
+                    lightweight=True,
+                )
             return Decision(
                 Action.NOOP,
                 f"usage {used:.1f}% is below the trigger threshold {config.trigger_percent}%",
                 self.mode,
             )
 
-        # --- محدودیت‌های محیطی -----------------------------------------
-        block_reason, details = self._blocking_environment()
-        if block_reason:
-            mode = self.mode
-            return Decision(Action.SKIPPED, block_reason, mode, details={"environment": details})
-
-        # --- هدف مطلق: اگر RAM کافی آزاد است نیازی نیست ---------------
+        # --- هدف مطلق: اگر RAM کافی آزاد است، پاس سنگین لازم نیست ----
         if config.min_available_mb > 0 and reading.available_mb >= config.min_available_mb:
+            if config.periodic_trim_enabled:
+                return Decision(
+                    Action.OPTIMIZED,
+                    f"{reading.available_mb:.0f} MB already free "
+                    f"(min_available_mb {config.min_available_mb}) - periodic lightweight pass",
+                    self.mode,
+                    should_optimize=True,
+                    lightweight=True,
+                )
             return Decision(
                 Action.NOOP,
                 f"{reading.available_mb:.0f} MB already free "
@@ -334,6 +361,15 @@ class OptimizerEngine:
         # --- cooldown -------------------------------------------------
         remaining = self._cooldown_remaining()
         if remaining > 0:
+            if config.periodic_trim_enabled:
+                return Decision(
+                    Action.OPTIMIZED,
+                    f"heavy pass cooling down ({remaining:.0f} s) - periodic lightweight pass",
+                    self.mode,
+                    should_optimize=True,
+                    lightweight=True,
+                    details={"cooldown_remaining_s": round(remaining)},
+                )
             return Decision(
                 Action.SKIPPED,
                 f"cooling down - {remaining:.0f} s remaining",
@@ -344,6 +380,15 @@ class OptimizerEngine:
         # --- سقف ساعتی ------------------------------------------------
         recent = self._recent_purges()
         if config.max_purges_per_hour > 0 and recent >= config.max_purges_per_hour:
+            if config.periodic_trim_enabled:
+                return Decision(
+                    Action.OPTIMIZED,
+                    f"hourly heavy-pass cap reached ({recent}/{config.max_purges_per_hour}) - periodic lightweight pass",
+                    self.mode,
+                    should_optimize=True,
+                    lightweight=True,
+                    details={"purges_last_hour": recent},
+                )
             oldest = min(self.purge_history)
             wait_s = max(0.0, 3600 - (self._now() - oldest).total_seconds())
             return Decision(
@@ -411,20 +456,45 @@ class OptimizerEngine:
         # ---- اجرا ----
         if force:
             result.reason = "manual run (force)"
+            # force دستی یعنی پاس کامل، حتی اگر تصمیم سبک بوده
+            lightweight = False
+        else:
+            lightweight = decision.lightweight
+        result.lightweight = lightweight
 
-        trim = memory_mod.trim_working_sets(self.api, self.provider, self.config)
+        if lightweight:
+            import dataclasses
+
+            light_config = dataclasses.replace(
+                self.config,
+                max_processes=self.config.periodic_trim_max_processes,
+                min_process_ws_mb=max(
+                    self.config.min_process_ws_mb, self.config.periodic_trim_min_process_ws_mb
+                ),
+                purge_standby_list=False,
+                flush_modified_list=False,
+            )
+            trim = memory_mod.trim_working_sets(self.api, self.provider, light_config)
+            purge = memory_mod.PurgeReport(skipped_reason="lightweight periodic pass")
+        else:
+            trim = memory_mod.trim_working_sets(self.api, self.provider, self.config)
+            result.trim = trim
+
+            # اندازه‌گیری بعد از trim: تصمیم برای Standby List بر اساس واقعیت
+            after_trim = self.api.memory_snapshot()
+            available_after_trim_mb = (
+                after_trim.available_mb if after_trim else reading.available_mb
+            )
+
+            purge = memory_mod.purge_standby_list(self.api, self.config, available_after_trim_mb)
+
         result.trim = trim
-
-        # اندازه‌گیری بعد از trim: تصمیم برای Standby List بر اساس واقعیت
-        after_trim = self.api.memory_snapshot()
-        available_after_trim_mb = after_trim.available_mb if after_trim else reading.available_mb
-
-        purge = memory_mod.purge_standby_list(self.api, self.config, available_after_trim_mb)
         result.purge = purge
 
-        flushed, flush_error = memory_mod.flush_modified_list(self.api, self.config)
-        if self.config.flush_modified_list and not flushed:
-            logger.warning("Flush modified list failed: %s", flush_error or "unknown")
+        if not lightweight:
+            flushed, flush_error = memory_mod.flush_modified_list(self.api, self.config)
+            if self.config.flush_modified_list and not flushed:
+                logger.warning("Flush modified list failed: %s", flush_error or "unknown")
 
         final = self.api.memory_snapshot()
         if final is not None:
@@ -439,11 +509,44 @@ class OptimizerEngine:
         did_something = trim.trimmed > 0 or purge.purged
         result.action = Action.OPTIMIZED if did_something else Action.SKIPPED
         if not did_something:
-            result.reason = _failure_reason(trim, purge)
-            # شکست را در تاریخچه ثبت نمی‌کنیم تا cooldown بیهوده فعال نشود،
-            # ولی بک‌آف ساعتی را زیاد می‌کنیم تا فشار بی‌فایده تکرار نشود.
-            self.consecutive_useless += 1
-            logger.warning("pass released nothing | %s | %s", result.reason, _describe(reading))
+            if lightweight:
+                result.reason = (
+                    f"periodic lightweight pass: nothing trimmed "
+                    f"(considered {trim.considered}, denied {trim.denied}, failed {trim.failed})"
+                )
+                logger.debug("%s | %s", result.reason, _describe(reading))
+            else:
+                result.reason = _failure_reason(trim, purge)
+                # شکست پاس سنگین را در تاریخچه ثبت نمی‌کنیم تا cooldown بیهوده فعال نشود،
+                # ولی بک‌آف ساعتی را زیاد می‌کنیم تا فشار بی‌فایده تکرار نشود.
+                self.consecutive_useless += 1
+                logger.warning("pass released nothing | %s | %s", result.reason, _describe(reading))
+            self.last_result = result
+            return result
+
+        if lightweight:
+            # پاس سبک نباید cooldown/سقف ساعتی پاس سنگین را مصرف کند.
+            self.total_freed_mb += result.freed_mb
+            avg_freed = (trim.freed_bytes / trim.trimmed / MB) if trim.trimmed else 0.0
+            logger.info(
+                "lightweight pass | processes %d of %d (avg %.0f MB, access denied: %d) "
+                "| working set released: %.0f MB | free RAM %.0f -> %.0f MB | "
+                "usage %.1f%% -> %.1f%% | %.0f ms",
+                trim.trimmed,
+                trim.considered,
+                avg_freed,
+                trim.denied,
+                trim.freed_mb,
+                reading.available_mb,
+                result.available_mb_after
+                if result.available_mb_after is not None
+                else reading.available_mb,
+                reading.used_percent,
+                result.used_percent_after
+                if result.used_percent_after is not None
+                else reading.used_percent,
+                result.duration_ms,
+            )
             self.last_result = result
             return result
 
